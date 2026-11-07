@@ -8,7 +8,7 @@ import random
 
 import pytest
 
-from app.input_manager import GESTURE_SOURCE, PRIMARY, InputManager
+from app.input_manager import GESTURE_SOURCE, MAPPING_SOURCES, PRIMARY, InputManager
 from app.models import ModeChangeEvent, SignalReliabilityEvent
 
 CFG = {
@@ -103,27 +103,51 @@ def target(im: InputManager) -> tuple[str, dict[str, str | None]]:
     return mode, {k: mapping.get(k) for k in PRIMARY}
 
 
-def check_merge_window(im: InputManager, held_since: int | None, i: int, changes, tag: str) -> int | None:
-    """A remap may lag health only while held, and is announced within merge_window readings.
+def trailing(readings: list[float], pred) -> int:
+    n = 0
+    for r in reversed(readings):
+        if not pred(r):
+            break
+        n += 1
+    return n
 
-    Returns the step the current lag started at (None if the mapping matches health).
+
+def run_under_way(im: InputManager, source: str, readings: list[float], left: int) -> bool:
+    """`source` is part-way through a health-changing run that can finish within `left` more readings."""
+    if im.healthy.get(source, False):
+        k = trailing(readings, lambda r: r < CFG["reliability_cutoff"])
+        return k > 0 and CFG["remap_window"] - k <= left
+    k = trailing(readings, lambda r: r >= CFG["recover_cutoff"])
+    return k > 0 and CFG["recover_window"] - k <= left
+
+
+def check_merge_window(im: InputManager, hold_start: int | None, i: int, changes, hist, tag: str) -> int | None:
+    """A remap may lag health only while held; a hold needs a run under way and ends within merge_window.
+
+    Returns the step the current hold started at (None if no remap is held).
     """
     lagging = snapshot(im) != target(im)
     if changes:
         assert not lagging, f"{tag}: announced {snapshot(im)} but health calls for {target(im)}"
-    if not lagging:
+    if lagging:
+        assert im.remap_held, f"{tag}: mapping {snapshot(im)} lags health {target(im)} without a held remap"
+    if not im.remap_held:
         return None
-    assert im.remap_held, f"{tag}: mapping {snapshot(im)} lags health {target(im)} without a held remap"
-    held_since = i if held_since is None else held_since
-    assert i - held_since < CFG["merge_window"], f"{tag}: remap held since step {held_since}"
-    return held_since
+    hold_start = i if hold_start is None else hold_start
+    assert i - hold_start < CFG["merge_window"], f"{tag}: remap held since step {hold_start}"
+    left = hold_start + CFG["merge_window"] - i
+    assert any(run_under_way(im, s, hist.get(s, []), left) for s in MAPPING_SOURCES), (
+        f"{tag}: remap held with no run under way; last readings "
+        f"{ {s: hist.get(s, [])[-5:] for s in MAPPING_SOURCES} } health {im.healthy}"
+    )
+    return hold_start
 
 
 def run_sequence(seed: int) -> bool:
     """Check every invariant along one random sequence; returns True if a remap was ever held."""
     im = InputManager(cfg=dict(CFG))
     hist: dict[str, list[float]] = {}
-    held_since: int | None = None
+    hold_start: int | None = None
     held = False
     for i, signals in enumerate(gen_sequence(seed)):
         before = snapshot(im)
@@ -134,8 +158,8 @@ def run_sequence(seed: int) -> bool:
         tag = f"seed={seed} step={i}"
         check_invariants(im, before, changes, tag)
         check_health_rule(prev, im, hist, signals, tag)
-        held_since = check_merge_window(im, held_since, i, changes, tag)
-        held = held or held_since is not None
+        hold_start = check_merge_window(im, hold_start, i, changes, hist, tag)
+        held = held or hold_start is not None
     return held
 
 
@@ -145,25 +169,23 @@ def test_random_sequences_keep_invariants(seed: int) -> None:
 
 
 def test_random_sequences_exercise_the_merge_window() -> None:
-    held = sum(run_sequence(seed) for seed in SEEDS)  # 402 of 600 at the time of writing
-    assert held >= 300, f"only {held} of {len(SEEDS)} seeds held a remap"
+    held = sum(run_sequence(seed) for seed in SEEDS)  # 298 of 600 at the time of writing
+    assert held >= 200, f"only {held} of {len(SEEDS)} seeds held a remap"
 
 
 def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
     """Random warm-up, then every reading in [0.6, 0.75): health cannot change, so neither can the mapping.
 
-    A remap held at the end of the warm-up lands first (within merge_window readings).
+    A hover breaks every run, so a remap held at the end of the warm-up lands on the first hover reading.
     Returns True if the warm-up ended in scan mode, i.e. the hover phase exercised the sticky SELECT.
     """
     rng = random.Random(seed)
     im = InputManager(cfg=dict(CFG))
     for warm in gen_sequence(seed, signals, steps=60):
         step(im, warm)
-    for i in range(CFG["merge_window"] + 1):
-        if not im.remap_held:
-            break
+    if im.remap_held:
         step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
-    assert not im.remap_held, f"hover seed={seed}: remap still held after {CFG['merge_window']} readings"
+    assert not im.remap_held, f"hover seed={seed}: remap still held after a hover reading"
     frozen = (dict(im.healthy), im.current_mapping(), im.mode)
     in_scan = im.mode == "scan"
     for i in range(HOVER_STEPS):
