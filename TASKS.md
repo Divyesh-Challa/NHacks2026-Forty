@@ -30,9 +30,10 @@ Both of you produce the same output: dicts from `signal/messages.py`, yielded by
 **B1: Nathaniel: EXG pills, Arduino, EOG/EMG pipeline**
 - [ ] Wire the BioAmp EXG Pills and verify the output range and wiring against the Upside Down Labs docs
 - [ ] `arduino/relay_exg/relay_exg.ino`: confirm a steady 500 Hz (raise the baud if lines drop)
-- [ ] `signal/sources/arduino_serial.py`: parse `t_us,a0,a1,a2`
-- [ ] `filters.py` (EOG low-pass + drift, EMG bandpass + notch + RMS) and `detectors.py` (thresholds, refractory period, confidence), with tests
-- [ ] **HELP contract:** emit `jaw_hold` only once a clench has lasted ≥ `help_hold_ms` (2 s), and do NOT also emit `jaw_clench` for that same hold. The input manager treats `jaw_hold` as a confirmed HELP.
+- [x] `signal/sources/arduino_serial.py`: parse `t_us,a0,a1,a2` → `sources/pipeline.py` (filters → detectors → reliability). Needs a test on the real board: `make signal-hw PORT=…`
+- [x] `filters.py` (EOG low-pass + adaptive baseline, EMG bandpass + notch + RMS) and `detectors.py` (thresholds, near-miss floor, refractory period, confidence), with tests on synthetic data
+- [ ] On the real electrodes: `make plot PORT=…`. Check that each gesture clears the solid threshold line and rest stays inside the dashed floor lines. Tune `[detectors]` in `config/relay.toml` if calibration can't fix it
+- [x] **HELP contract:** emit `jaw_hold` only once a clench has lasted ≥ `help_hold_ms` (2 s), and do NOT also emit `jaw_clench` for that same hold (tested)
 
 **B2: Lawrence: synthetic data, signal tooling, reliability, calibration**
 - [x] `signal/sources/synthetic.py`: Arduino-format waveforms (EOG steps, blink spikes, EMG bursts, drift, 60 Hz, crosstalk) with ground-truth labels + `degrade()`; live stream uses a simulated detector until `detectors.py` exists
@@ -40,8 +41,9 @@ Both of you produce the same output: dicts from `signal/messages.py`, yielded by
 - [x] `signal/tools/record.py`: prompted, labelled CSV sessions
 - [ ] Record real sessions with the electrodes: `python -m tools.record --source serial --port … --reps 10`
 - [x] `reliability.py`: `ReliabilityTracker`, rolling windows (8 attempts, 20 rest seconds), seeded from calibration, usage errors count as misses
-- [ ] **Open question (with Nathaniel):** on real hardware nobody knows when a gesture was *attempted* but missed. Proposal: outside calibration, score each signal from detected-gesture amplitude vs its calibrated amplitude, plus rest-time false triggers
-- [ ] `calibration.py`: guided prompts → POST `/calibration`; **log accuracy numbers for the pitch**
+- [x] **Live reliability on hardware:** a *near-miss* (past the floor, short of threshold) counts as a failed attempt; FTR stays at its calibrated value. Revisit after seeing real data
+- [x] `calibration.py`: guided prompts → per-person thresholds, accuracy, FTR → `signal/calibration.json` + POST `/calibration`
+- [ ] Run `make calibrate PORT=…` on the demo wearer and **paste the accuracy table into the README** for the pitch
 
 **Both:** README "Technical decisions": filters, thresholds, reliability formula
 

@@ -18,15 +18,33 @@ scan_interval_ms = 1500
 [signal]
 sample_rate_hz = 500
 eog_lowpass_hz = 10.0
-eog_highpass_hz = 0.1
+eog_baseline_s = 1.0         # EOG drift: slow baseline (time constant), frozen while the eyes are moving
 emg_band_hz = [20.0, 150.0]
 notch_hz = 60.0
+emg_rms_ms = 50.0            # jaw EMG envelope smoothing
 refractory_ms = 400
 reliability_interval_ms = 1000
 attempt_window = 8           # reliability: accuracy over the last N gesture attempts per signal
 rest_window = 20             # reliability: false-trigger rate over the last N rest seconds per signal
 default_accuracy = 0.9       # seed when a signal has no calibration yet
 default_false_trigger_rate = 0.05
+
+[detectors]
+# Defaults until calibration.py has run (it writes signal/calibration.json, which overrides these).
+# Units are ADC counts after filtering. threshold = detect; floor = "an attempt that fell short"
+# (counts as a missed attempt in live reliability). Tuned to the synthetic source.
+eog_threshold = 80.0
+eog_floor = 40.0
+eog_invert = false            # flip if look_left reads positive on A0 (calibration detects this)
+eog_confirm_ms = 60           # must stay past threshold this long (rejects spikes)
+blink_threshold = 110.0
+blink_floor = 40.0
+blink_max_ms = 400            # longer vertical excursions are looks, not blinks
+double_blink_ms = 700         # two blinks within this = blink_double
+jaw_threshold = 20.0
+jaw_floor = 8.0
+jaw_min_ms = 100              # shorter bursts are noise
+max_excursion_s = 5.0         # a "movement" longer than this re-baselines (electrode shift)
 
 [synthetic]
 adc_mid = 512                # 10-bit ADC centre, same units the Arduino prints

@@ -1,4 +1,4 @@
-.PHONY: setup backend signal frontend frontend-https test demo-check
+.PHONY: setup backend signal signal-hw plot calibrate frontend frontend-https test demo-check
 
 setup:
 	cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -10,6 +10,18 @@ backend:
 
 signal:
 	cd signal && .venv/bin/python run.py --source synthetic
+
+# Hardware: make signal-hw PORT=/dev/tty.usbmodem1101  (find it with: ls /dev/tty.usb*)
+signal-hw:
+	cd signal && .venv/bin/python run.py --source arduino --port $(PORT)
+
+# Filtered traces + thresholds; synthetic without PORT
+plot:
+	cd signal && .venv/bin/python -m tools.plot_live --filtered $(if $(PORT),--source serial --port $(PORT),)
+
+# Guided calibration (~3 min) with PORT; instant synthetic dry run without
+calibrate:
+	cd signal && .venv/bin/python calibration.py $(if $(PORT),--source serial --port $(PORT),)
 
 frontend:
 	cd frontend && npm run dev
