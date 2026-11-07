@@ -1,15 +1,15 @@
 """Caregiver JWT auth + patient pairing. Owner: Role D. Time-box ~2 h.
 
-SCAFFOLD STATUS: accepts the demo caregiver / demo pair code, issues real JWTs.
-TODO: bcrypt-hashed caregivers in DB, generated 6-digit codes, `require_caregiver` dependency on routes.
+Caregivers (bcrypt-hashed) and patient pair codes live in the DB (db.py); JWTs are real.
+TODO (Role D): generated 6-digit codes, `require_caregiver` dependency on caregiver routes + WS.
 """
 
 import time
 
 import jwt
 
-from .config import DEMO_CAREGIVER_PASSWORD, JWT_SECRET
-from .seed import DEMO_CAREGIVER_EMAIL, DEMO_PAIR_CODE, DEMO_PATIENT_ID
+from . import db
+from .config import JWT_SECRET
 
 
 def issue_token(sub: str, role: str, ttl_s: int = 7 * 24 * 3600) -> str:
@@ -21,13 +21,15 @@ def decode_token(token: str) -> dict:
 
 
 def login(email: str, password: str) -> str | None:
-    if email == DEMO_CAREGIVER_EMAIL and password == DEMO_CAREGIVER_PASSWORD:
+    caregiver = db.get_caregiver(email)
+    if caregiver and db.check_password(password, caregiver.password_hash):
         return issue_token(email, "caregiver")
     return None
 
 
 def pair(code: str) -> tuple[str, str] | None:
     """Returns (patient_id, token) for a valid code."""
-    if code == DEMO_PAIR_CODE:
-        return DEMO_PATIENT_ID, issue_token(DEMO_PATIENT_ID, "patient", ttl_s=365 * 24 * 3600)
+    patient = db.get_patient_by_code(code)
+    if patient:
+        return patient.id, issue_token(patient.id, "patient", ttl_s=365 * 24 * 3600)
     return None

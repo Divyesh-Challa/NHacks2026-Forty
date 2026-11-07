@@ -12,6 +12,10 @@ from .ws import hub, router as ws_router
 
 logging.basicConfig(level=logging.INFO)
 
+DEMO_SIGNAL_GROUPS = {"eye": ["eog_h", "blink"]}
+
+db.init_db()
+
 app = FastAPI(title="Relay")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(ws_router)
@@ -75,6 +79,12 @@ def get_messages(patient_id: str) -> list[dict]:
 
 @app.post("/demo/degrade")
 async def demo_degrade(body: DegradeRequest, patient_id: str = "p1") -> dict:
-    """Demo only: tell the signal service to scale a signal's gain down."""
-    await hub.to_signal(patient_id, {"type": "degrade", "signal": body.signal.value, "factor": body.factor})
-    return {"ok": True}
+    """Demo only: tell the signal service to scale a signal's gain down.
+
+    "eye" degrades both eye-electrode signals (eog_h + blink) in one call — the stage demo uses it
+    to go straight from eye-movement split mode to jaw-clench scan mode.
+    """
+    signals = DEMO_SIGNAL_GROUPS.get(body.signal, [body.signal])
+    for signal in signals:
+        await hub.to_signal(patient_id, {"type": "degrade", "signal": signal, "factor": body.factor})
+    return {"ok": True, "signals": signals}

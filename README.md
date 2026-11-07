@@ -35,7 +35,14 @@ make test
 
 **With hardware:** flash `arduino/relay_exg/relay_exg.ino`, then `cd signal && .venv/bin/python run.py --source arduino --port /dev/tty.usbmodemXXXX`. *(TODO: Role B)*
 
-**Demo degrade:** `curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d '{"signal":"eog_h","factor":0.3}'`
+**Demo degrade (stage step 2):** this degrades both eye signals, so Relay switches from eye-movement split mode to jaw-clench scan mode after about 10 s:
+
+```bash
+curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d '{"signal":"eye","factor":0.3}'
+# restore: same call with "factor": 1.0.  Single signals also work: "eog_h", "blink", "jaw"
+```
+
+The database is `backend/relay.db`, created and seeded with fake data on first start. Delete it to reset.
 
 ## Demo credentials
 
