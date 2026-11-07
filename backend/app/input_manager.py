@@ -51,7 +51,8 @@ SPLIT_PAIRS: list[tuple[str, str]] = [
     ("blink_double", "jaw_clench"),
     ("brow_raise", "jaw_clench"),
 ]
-# Scan-mode SELECT candidates; the most reliable healthy one wins.
+# Scan-mode SELECT candidates. The current SELECT is kept while it is healthy or while none is;
+# otherwise the most reliable healthy candidate is picked.
 SCAN_SELECT = ["jaw_clench", "blink_double", "brow_raise", "look_right"]
 # Optional split-mode extras, assigned when the gesture is healthy and not already used.
 SPLIT_EXTRAS = [("SELECT", "jaw_clench"), ("BACK", "blink_double")]
