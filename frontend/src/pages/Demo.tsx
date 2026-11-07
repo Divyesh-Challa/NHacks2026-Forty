@@ -17,7 +17,7 @@ export default function Demo() {
 
   useEffect(() => {
     const s = connect(
-      `/ws/caregiver/${PATIENT_ID}`,
+      `/ws/patient/${PATIENT_ID}`, // same reliability + mode_change events, no caregiver token needed
       (ev) => {
         if (ev.type === 'reliability') setRel(ev)
         else if (ev.type === 'mode_change') setChanges((c) => [ev, ...c].slice(0, 5))
