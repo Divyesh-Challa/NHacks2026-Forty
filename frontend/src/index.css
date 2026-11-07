@@ -38,3 +38,50 @@ body { margin: 0; min-height: 100vh; }
 .feed li { background: var(--panel); padding: 12px; border-radius: 8px; }
 .feed li.urgent { background: var(--urgent); font-weight: 700; }
 .error { color: var(--urgent); }
+
+/* Demo control panel (/demo) */
+.muted { color: var(--muted); }
+.demo-buttons { display: flex; flex-direction: column; gap: 12px; }
+.demo button { font-size: 1.1rem; padding: 16px; border-radius: 10px; background: var(--accent); border: none; font-weight: 700; }
+.demo button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--muted); }
+.meter { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 12px; margin: 10px 0; }
+.bar { height: 16px; background: var(--panel); border-radius: 8px; overflow: hidden; }
+.fill { height: 100%; background: #34c759; transition: width 0.3s; }
+.fill.low { background: var(--urgent); }
+
+/* Patient: spelling + suggestions */
+.letter-buffer { background: var(--panel); border-radius: 12px; padding: 16px 20px; font-size: 2.5rem; min-height: 1.6em; letter-spacing: 0.04em; }
+.caret { display: inline-block; width: 3px; height: 1em; background: var(--accent); margin-left: 4px; vertical-align: -0.1em; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.predictions { align-items: center; }
+
+/* Caregiver */
+.cg-header { display: flex; align-items: baseline; gap: 12px; }
+.cg-header h1 { margin-right: auto; }
+.caregiver button.link { background: none; color: var(--muted); text-decoration: underline; padding: 0; }
+.caregiver button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--muted); }
+.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0; }
+.tabs button { background: var(--panel); color: var(--fg); border: 1px solid transparent; font-weight: 600; }
+.tabs button.active { border-color: var(--accent); color: var(--accent); }
+.urgent-banner { width: 100%; background: var(--urgent) !important; color: #fff; font-size: 1.1rem; animation: pulse 1s infinite alternate; }
+@keyframes pulse { to { opacity: 0.7; } }
+.feed .time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.editor { display: flex; flex-direction: column; gap: 12px; }
+.board-draft { background: var(--panel); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.board-draft .row { display: flex; gap: 8px; }
+.board-draft .row input { flex: 1; }
+.caregiver textarea { font: inherit; font-size: 1rem; padding: 10px; border-radius: 8px; border: 1px solid var(--muted); background: var(--bg); color: var(--fg); resize: vertical; }
+.caregiver input { background: var(--bg); color: var(--fg); }
+
+/* Reliability chart */
+.chart { margin: 0; background: var(--panel); border-radius: 10px; padding: 12px; position: relative; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart .grid { stroke: #2c333e; stroke-width: 1; }
+.chart .cutoff { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+.chart .crosshair { stroke: var(--muted); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font-size: 10px; }
+.chart .direct-label { fill: var(--fg); font-size: 10px; }
+.legend { list-style: none; display: flex; gap: 14px; padding: 0; margin: 0 0 8px; font-size: 0.85rem; color: var(--fg); }
+.legend .swatch { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.tooltip { margin-top: 6px; font-size: 0.85rem; color: var(--fg); }
+.sr-table { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

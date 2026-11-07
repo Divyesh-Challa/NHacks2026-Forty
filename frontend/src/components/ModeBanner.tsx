@@ -1,21 +1,23 @@
-// Shown on mode_change, e.g. "Eye movement is getting harder to read. Switching to jaw clench."
+// Shown on mode_change with the backend's plain-language reason,
+// e.g. "Eye movement reliability fell below 60%. Switching to scan mode with jaw clench to select."
 import { useEffect, useState } from 'react'
 import type { ModeChangeEvent } from '../lib/types'
 
+const SHOW_MS = 8000
+
 export function ModeBanner({ change }: { change: ModeChangeEvent | null }) {
-  const [visible, setVisible] = useState(false)
+  const [hiddenFor, setHiddenFor] = useState<ModeChangeEvent | null>(null)
 
   useEffect(() => {
     if (!change) return
-    setVisible(true)
-    const t = setTimeout(() => setVisible(false), 6000)
+    const t = setTimeout(() => setHiddenFor(change), SHOW_MS)
     return () => clearTimeout(t)
   }, [change])
 
-  if (!change || !visible) return null
+  if (!change || hiddenFor === change) return null
   return (
     <div className="banner" role="status">
-      Switching to {change.to} mode — {change.reason}
+      {change.reason}
     </div>
   )
 }

@@ -11,8 +11,9 @@ export interface BoardProps {
 
 export function SplitBoard({ items, command, onSelect }: BoardProps) {
   const [range, setRange] = useState<[number, number]>([0, items.length])
-
-  useEffect(() => setRange([0, items.length]), [items])
+  // Reset only when the list's contents change, not on every new array from the parent.
+  const itemsKey = items.join('\n')
+  useEffect(() => setRange([0, items.length]), [itemsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!command) return

@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Caregiver from './pages/Caregiver'
+import Demo from './pages/Demo'
 import Pair from './pages/Pair'
 import Patient from './pages/Patient'
 
@@ -10,6 +11,7 @@ export default function App() {
         <Route path="/patient/:id" element={<Patient />} />
         <Route path="/caregiver" element={<Caregiver />} />
         <Route path="/pair" element={<Pair />} />
+        <Route path="/demo" element={<Demo />} />
         <Route path="*" element={<Navigate to="/patient/p1" replace />} />
       </Routes>
     </BrowserRouter>
