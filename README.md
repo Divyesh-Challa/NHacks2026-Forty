@@ -74,7 +74,7 @@ The database is `backend/relay.db`, created and seeded with fake data on first s
 
 - **Health per signal, not per reading.** Every reliability reading for a signal counts as one attempt. A healthy signal becomes unhealthy only after **10 consecutive readings below 0.6**. One bad second never takes away a control the person is using.
 - **Hysteresis.** An unhealthy signal is trusted again only after **20 consecutive readings ≥ 0.75**. The gap between 0.6 and 0.75 plus the longer recovery window keeps a signal hovering near the cutoff from flipping the board back and forth (tested in `test_no_flapping_around_cutoff`).
-- **Mode choice.** Split mode uses the first healthy pair from: look left/right → blink + jaw clench → eyebrow + jaw clench. With no healthy pair, scan mode uses the most reliable healthy gesture as SELECT.
+- **Mode choice.** Split mode uses the first healthy pair from: look left/right → blink + jaw clench → eyebrow + jaw clench. With no healthy pair, scan mode uses the most reliable healthy gesture as SELECT, and keeps it until that signal becomes unreliable, so values hovering between the 60% and 75% cutoffs never flip it.
 - **Announcements.** A `mode_change` with a plain-language reason (e.g. "Eye movement reliability fell below 60%. Switching to double blink and jaw clench.") goes out only when the mode or a primary control changes. Losing an optional extra like BACK changes nothing on screen.
 - **HELP** is a sustained jaw clench (`jaw_hold`, ~2 s), confirmed in the detector, so an ordinary clench can never raise a false alarm. In scan mode HELP is also a scan item.
 - **Debounce.** A repeated command within 300 ms is dropped, per command.
