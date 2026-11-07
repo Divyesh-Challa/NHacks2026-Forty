@@ -136,14 +136,14 @@ class InputManager:
         out.append(self.snapshot())
         return out
 
-    def force_mode(self, mode: Mode, reason: str = "manual toggle") -> ModeChangeEvent | None:
+    def force_mode(self, mode: Mode, reason: str | None = None) -> ModeChangeEvent | None:
         if mode == self.mode:
             return None
         self.override = mode
         auto_mode, _ = self._choose(use_override=False)
         if auto_mode == mode:
             self.override = None
-        return self._apply(lambda: reason)
+        return self._apply(lambda: reason or f"Switched to {mode} mode by hand (testing).")
 
     # --- state out ---
 

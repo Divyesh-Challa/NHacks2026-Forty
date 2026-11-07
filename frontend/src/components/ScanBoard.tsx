@@ -24,7 +24,10 @@ export function ScanBoard({ items, command, onSelect, intervalMs }: BoardProps &
   return (
     <div className="scan">
       {items.map((item, i) => (
-        <div key={item} className={`item ${i === index ? 'active' : ''}`}>{item}</div>
+        <div key={item} className={`item${i === index ? ' active' : ''}${item.includes('HELP') ? ' help' : ''}`}>
+          {item}
+          {i === index && <span className="scan-timer" style={{ animationDuration: `${intervalMs}ms` }} key={index} />}
+        </div>
       ))}
     </div>
   )
