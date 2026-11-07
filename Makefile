@@ -1,4 +1,4 @@
-.PHONY: gates setup backend signal signal-hw plot calibrate frontend frontend-https test demo-check
+.PHONY: gates setup backend signal signal-keyboard signal-hw plot calibrate frontend frontend-https test demo-check
 
 setup:
 	cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -10,6 +10,10 @@ backend:
 
 signal:
 	cd signal && .venv/bin/python run.py --source synthetic
+
+# Keyboard demo: no scripted gestures reach the wheel, but /demo degrade still drops reliability.
+signal-keyboard:
+	cd signal && .venv/bin/python run.py --source synthetic --script quiet
 
 # Hardware: make signal-hw PORT=/dev/tty.usbmodem1101  (find it with: ls /dev/tty.usb*)
 signal-hw:

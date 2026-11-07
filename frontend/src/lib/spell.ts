@@ -1,4 +1,4 @@
-// Spelling board items (frequency-ordered so common letters take fewer split-mode halvings).
+// Spelling board items (frequency-ordered so common letters come up sooner in the scan).
 export const SPELL_SPEAK = '🔊 Speak'
 export const SPELL_DELETE = '⌫ Delete'
 export const SPELL_SPACE = '␣ Space'

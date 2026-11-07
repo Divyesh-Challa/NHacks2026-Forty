@@ -116,7 +116,7 @@ async def main(base: str) -> None:
             tasks = [asyncio.create_task(t.run()) for t in (signal, patient, caregiver)]
 
             async def step1() -> str:
-                await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "split", 5)
+                await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "wheel", 5)
                 mark = len(patient.events)
                 await signal.gesture("eog_h", "look_left")
                 await signal.gesture("eog_h", "look_right")
@@ -153,8 +153,8 @@ async def main(base: str) -> None:
             async def recover() -> str:
                 mark = len(patient.events)
                 await http.post("/demo/degrade", json={"signal": "eye", "factor": 1.0})
-                change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "split", 10, mark)
-                return f"restored → split. “{change['reason']}”"
+                change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "wheel", 10, mark)
+                return f"restored → wheel. “{change['reason']}”"
 
             await step("1. Select a phrase with eye movement", step1())
             await step("2. Eyes decline → jaw-clench scan mode", step2())

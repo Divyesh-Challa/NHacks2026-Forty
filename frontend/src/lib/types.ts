@@ -58,8 +58,7 @@ export type ServerEvent =
 export type PatientEvent =
   | { type: 'spoken'; text: string; path?: string[]; ts: number }
   | { type: 'alert'; message: string; ts: number }
-  // The backend still calls wheel mode "split" until the backend follow-up lands.
-  | { type: 'set_mode'; mode: 'split' | 'scan' }
+  | { type: 'set_mode'; mode: Mode }
 
 export interface Board {
   id: string

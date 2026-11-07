@@ -82,7 +82,7 @@ async def demo_degrade(body: DegradeRequest, patient_id: str = "p1") -> dict:
     """Demo only: tell the signal service to scale a signal's gain down.
 
     "eye" degrades both eye-electrode signals (eog_h + blink) in one call — the stage demo uses it
-    to go straight from eye-movement split mode to jaw-clench scan mode.
+    to go straight from eye-movement wheel mode to jaw-clench scan mode.
     """
     signals = DEMO_SIGNAL_GROUPS.get(body.signal, [body.signal])
     for signal in signals:

@@ -48,9 +48,9 @@ def test_mode_change_serializes_from(client: TestClient) -> None:
         patient.receive_json()
         patient.send_json({"type": "set_mode", "mode": "scan"})
         msg = patient.receive_json()
-        patient.send_json({"type": "set_mode", "mode": "split"})
+        patient.send_json({"type": "set_mode", "mode": "wheel"})
         patient.receive_json()
-    assert msg == {"type": "mode_change", "from": "split", "to": "scan", "reason": "Switched to scan mode by hand (testing)."}
+    assert msg == {"type": "mode_change", "from": "wheel", "to": "scan", "reason": "Switched to scan mode by hand (testing)."}
 
 
 def test_jaw_hold_alerts_caregiver(client: TestClient, token: str) -> None:
@@ -91,7 +91,7 @@ def test_spoken_and_alert_saved_to_history(client: TestClient, auth: dict) -> No
         patient.send_json({"type": "alert", "message": "HELP", "ts": 200})
         patient.send_json({"type": "set_mode", "mode": "scan"})  # round-trip to ensure both were handled
         patient.receive_json()
-        patient.send_json({"type": "set_mode", "mode": "split"})
+        patient.send_json({"type": "set_mode", "mode": "wheel"})
         patient.receive_json()
     history = client.get("/patients/p1/messages", headers=auth).json()
     assert {"spoken", "alert"} <= {m["type"] for m in history}

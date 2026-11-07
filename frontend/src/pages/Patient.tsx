@@ -159,7 +159,7 @@ export default function Patient() {
       attachKeyboardSim((command) => run({ type: 'command', command }), {
         mode: () => {
           const next: Mode = mode === 'wheel' ? 'scan' : 'wheel'
-          if (connected) sock.current?.send({ type: 'set_mode', mode: next === 'wheel' ? 'split' : 'scan' })
+          if (connected) sock.current?.send({ type: 'set_mode', mode: next })
           else {
             setModeChange({ type: 'mode_change', from: mode, to: next, reason: `Switching to ${next} mode.` })
             setMode(next)

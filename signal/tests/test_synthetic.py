@@ -125,3 +125,23 @@ def test_script_never_raises_help() -> None:
     from sources.synthetic import DEFAULT_SCRIPT
 
     assert "jaw_hold" not in DEFAULT_SCRIPT
+
+
+def test_quiet_stream_sends_only_keyboard_gestures_but_still_degrades() -> None:
+    """Keyboard demo: scripted attempts and rest false triggers move reliability but never reach the wheel."""
+
+    async def collect() -> tuple[list[dict], SyntheticSource]:
+        src = SyntheticSource(interval_s=0.02, seed=9, quiet=True)
+        src.degrade("eog_h", 0.0)
+        src.trigger("jaw_hold")
+        out = []
+        async for ev in src.events():
+            out.append(ev)
+            if sum(e["type"] == "reliability" for e in out) >= 3:
+                return out, src
+        return out, src
+
+    events, src = asyncio.run(asyncio.wait_for(collect(), 5))
+    gestures = [e["gesture"] for e in events if e["type"] == "gesture"]
+    assert gestures == ["jaw_hold"]
+    assert src.tracker.score("eog_h") < 0.6

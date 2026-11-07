@@ -157,9 +157,18 @@ class SimulatedDetector:
 class SyntheticSource:
     """Gesture + reliability events for run.py. Scripted gestures and/or trigger() from the keyboard."""
 
-    def __init__(self, interval_s: float = 0.6, script: list[str] | None = DEFAULT_SCRIPT, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        interval_s: float = 0.6,
+        script: list[str] | None = DEFAULT_SCRIPT,
+        seed: int | None = None,
+        quiet: bool = False,
+    ) -> None:
         self.interval_s = interval_s
         self.script = script
+        # quiet: scripted attempts and rest false triggers still move reliability (so degrade works),
+        # but only trigger() gestures are sent, so a keyboard demo isn't driven by the script.
+        self.quiet = quiet
         self.rng = np.random.default_rng(seed)
         self.exg = SyntheticEXG(seed=seed)  # shares gains; available for plotting/recording
         self.detector = SimulatedDetector(self.rng)
@@ -223,12 +232,13 @@ class SyntheticSource:
             now = loop.time()
             if script and now >= next_gesture:
                 next_gesture += self.interval_s
-                if ev := self.attempt(next(script)):
+                if (ev := self.attempt(next(script))) and not self.quiet:
                     yield ev
             if now >= next_rest:
                 next_rest += 1.0
                 for ev in self.rest_second():
-                    yield ev
+                    if not self.quiet:
+                        yield ev
             if now >= next_rel:
                 next_rel += rel_every
                 yield self.reliability()

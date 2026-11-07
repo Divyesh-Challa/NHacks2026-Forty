@@ -40,7 +40,7 @@ Signal service (Python process)  — filters, gesture detectors, per-signal reli
         │ gesture events over WebSocket  (/ws/signal)
         ▼
 Backend (FastAPI)
-   ├─ Input manager   — gestures → 5 commands; picks split/scan mode; remaps on reliability
+   ├─ Input manager   — gestures → 8 commands; picks wheel/scan mode; remaps on reliability
    ├─ Prediction      — LLM phrase suggestions, fixed fallback list
    ├─ Auth            — caregiver login (JWT); patient device pairs via 6-digit code
    └─ SQLite          — patients, caregivers, boards, messages, calibration
@@ -107,7 +107,6 @@ The UI never sees raw signals. It only receives **eight commands** (radial wheel
 **Two UI modes:**
 - **Wheel mode** (eye movement reliable in all four directions): four fixed slots (up/right/down/left) plus a centre suggestion. The person learns positions by heart, so it works with eyes closed; an audio aid reads options aloud. The picked slot stays put and the other three change to what follows from it.
 - **Scan mode** (eye movement unreliable): the same wheel, with a highlight stepping through the slots, centre, Finish and HELP (default 1.5 s, configurable); the single best gesture = `SELECT`.
-- **Transition note:** until the backend follow-up lands, the backend still sends mode `split` and only `LEFT/RIGHT/SELECT/BACK/HELP`; the frontend reads `split` as `wheel` (`frontend/src/lib/normalize.ts`).
 
 **Signal service → backend** (`/ws/signal`):
 ```json
@@ -120,8 +119,8 @@ Gestures: `look_left`, `look_right`, `look_up`, `look_down`, `blink_double`, `ja
 **Backend → frontend** (`/ws/patient/{id}` and `/ws/caregiver/{id}`):
 ```json
 {"type": "command", "command": "SELECT", "via": "jaw", "confidence": 0.91, "ts": 1762490000000}
-{"type": "reliability", "signals": {"eog_h": 0.42, "blink": 0.80, "jaw": 0.95}, "mode": "split", "mapping": {"LEFT": "blink_double", "RIGHT": "jaw_clench"}}
-{"type": "mode_change", "from": "split", "to": "scan", "reason": "eye movement reliability below 60%"}
+{"type": "reliability", "signals": {"eog_h": 0.42, "blink": 0.80, "jaw": 0.95}, "mode": "scan", "mapping": {"SELECT": "jaw_clench", "HELP": "jaw_hold"}}
+{"type": "mode_change", "from": "wheel", "to": "scan", "reason": "eye movement reliability below 60%"}
 {"type": "alert", "level": "urgent", "patient_id": "p1", "message": "HELP", "ts": 1762490000000}
 {"type": "spoken", "patient_id": "p1", "text": "I need water", "ts": 1762490000000}
 ```
@@ -146,13 +145,13 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 | `POST /predict` | `{patient_id, recent_messages, time_of_day, present}` → `{phrases: [..3–5]}` |
 | `POST /calibration` | Store per-signal accuracy + false-trigger rate |
 | `GET /patients/{id}/messages` | Message + alert history |
-| `POST /demo/degrade` | Demo only: scale a signal's gain/reliability down (e.g. `{"signal": "eog_h", "factor": 0.3}`). `"signal": "eye"` degrades `eog_h` + `blink` together (stage demo: eye split → jaw scan in one call) |
+| `POST /demo/degrade` | Demo only: scale a signal's gain/reliability down (e.g. `{"signal": "eog_h", "factor": 0.3}`). `"signal": "eye"` degrades `eog_h` + `blink` together (stage demo: eye wheel → jaw scan in one call) |
 
 ## Component specs
 
 ### Signal service
 - **Synthetic source (build first):** generates realistic-ish waveforms at 250–500 Hz: EOG horizontal steps (look left/right), vertical blink spikes, jaw EMG bursts (broadband high-frequency), plus baseline drift and 60 Hz noise. Expose a way to script gestures (e.g. keyboard or a timed sequence) and a `degrade(signal, factor)` knob.
-- **Arduino source:** `arduino/relay_exg.ino` samples A0–A2 at a fixed rate (target 500 Hz) and prints `t_us,a0,a1,a2` at 115200 baud. Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG. Verify BioAmp EXG Pill output range and wiring against Upside Down Labs docs once hardware is in hand.
+- **Arduino source:** `arduino/relay_exg.ino` samples A0–A2 at a fixed rate (target 500 Hz) and prints `t_us,a0,a1,a2` at 250000 baud. Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG. Verify BioAmp EXG Pill output range and wiring against Upside Down Labs docs once hardware is in hand.
 - **Hardware we have:** one Arduino + the BioAmp EXG Pill kit with **3 pills** (one per channel: A0 horizontal EOG, A1 vertical EOG/blinks, A2 jaw EMG). **No Muse.** Every real signal comes through the EXG pills.
 - **Filters:** EOG: low-pass ~10 Hz plus drift handling (use slope/derivative or high-pass ~0.1 Hz rather than absolute level). EMG: bandpass ~20–150 Hz (limited by sample rate), 60 Hz notch, RMS envelope.
 - **Detectors:** threshold-based with refractory periods. Output `confidence` from how far past threshold the feature is.
@@ -160,8 +159,8 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 - **Reliability (live):** `r = accuracy × (1 − false_trigger_rate)` over a rolling window. Seed from calibration; update from usage (e.g., a `BACK` right after a selection counts as a likely error).
 
 ### Input manager (the differentiator — make this solid and tested)
-- Rank signals by reliability. Choose mode: split if ≥2 gestures with `r ≥ 0.6`, else scan.
-- Preferred mappings (first that qualifies): `look_left/look_right` → `LEFT/RIGHT`; else `blink_double` → `LEFT`, `jaw_clench` → `RIGHT`. Scan mode: best single gesture → `SELECT`.
+- Rank signals by reliability. Choose mode: wheel if horizontal and vertical eye movement (`eog_h`, `eog_v`) and a finish gesture all have `r ≥ 0.6`, else scan.
+- Wheel mapping: the four looks → `LEFT/RIGHT/UP/DOWN`; first healthy of `jaw_clench`, `blink_double`, `brow_raise` → `SELECT`; `blink_double` → `ACCEPT` when it isn't `SELECT`; `jaw_hold` → `HELP`. No `BACK` gesture (looking at the kept slot goes back). Scan mode: best single gesture → `SELECT`.
 - **Remap rule:** a mapped signal below 0.6 for its last 10 attempts triggers remap + `mode_change` event with a human-readable reason.
 - **Hysteresis:** switch back only if the signal stays ≥ 0.75 for 20 attempts. No flapping.
 - HELP requires hold-to-confirm. Debounce all commands (ignore duplicates within ~300 ms).
@@ -194,13 +193,13 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 1. Repo skeleton, `.env.example`, README stub.
 2. Backend: FastAPI app, SQLite models, seed data, WebSocket hub, keyboard-sim path end to end.
 3. Input manager + unit tests.
-4. Patient frontend: split board + scan board + TTS, driven by keyboard sim.
+4. Patient frontend: radial wheel + scan + TTS, driven by keyboard sim.
 5. Signal service: synthetic source, filters, detectors, reliability, tested on synthetic data; streams to backend.
 6. Caregiver page with live HELP alerts. Auth (time-boxed).
 
 **Saturday (hardware):** Arduino sketch + serial source, calibration flow, live reliability, demo degrade toggle, prediction, board editor, reliability chart. Full end-to-end run; record backup demo video.
 
-**Priority if time runs short:** input manager + live switch > split/scan boards > HELP alerts > prediction > auth > board editor > reliability chart.
+**Priority if time runs short:** input manager + live switch > wheel/scan boards > HELP alerts > prediction > auth > board editor > reliability chart.
 
 ## How judges score (for tradeoff decisions)
 

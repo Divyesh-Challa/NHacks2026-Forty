@@ -13,7 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class Command(str, Enum):
     LEFT = "LEFT"
     RIGHT = "RIGHT"
+    UP = "UP"
+    DOWN = "DOWN"
     SELECT = "SELECT"
+    ACCEPT = "ACCEPT"
     BACK = "BACK"
     HELP = "HELP"
 
@@ -38,7 +41,7 @@ class Gesture(str, Enum):
     brow_raise = "brow_raise"
 
 
-Mode = Literal["split", "scan"]
+Mode = Literal["wheel", "scan"]
 
 
 # --- signal service -> backend (/ws/signal) ---

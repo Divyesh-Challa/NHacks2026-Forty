@@ -60,8 +60,9 @@ def step(im: InputManager, signals: dict[str, float]) -> list[ModeChangeEvent]:
 
 def check_invariants(im: InputManager, before, changes: list[ModeChangeEvent], tag: str) -> None:
     mapping = im.current_mapping()
-    if im.mode == "split":
-        assert "LEFT" in mapping and "RIGHT" in mapping, f"{tag}: split without LEFT/RIGHT {mapping}"
+    if im.mode == "wheel":
+        assert {"LEFT", "RIGHT", "UP", "DOWN", "SELECT"} <= set(mapping), f"{tag}: wheel without looks/SELECT {mapping}"
+        assert "BACK" not in mapping, f"{tag}: wheel has no BACK gesture {mapping}"
     else:
         assert "SELECT" in mapping, f"{tag}: scan without SELECT {mapping}"
     after = snapshot(im)
@@ -141,7 +142,8 @@ def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
 
 def test_hover_between_cutoffs_never_flips_mapping() -> None:
     checked = sum(run_hover(seed, RIG) for seed in SEEDS)
-    assert checked >= 400, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
+    # Wheel mode needs both eye channels, so more warm-ups end in the skipped ambiguous-scan state.
+    assert checked >= 250, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
 
 
 # --- known gaps (real findings, app code deliberately untouched) ---
