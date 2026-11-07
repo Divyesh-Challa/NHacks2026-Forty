@@ -50,11 +50,8 @@ body { margin: 0; min-height: 100vh; }
 .feed li.urgent { background: var(--urgent); font-weight: 700; }
 .error { color: var(--urgent); }
 
-/* Demo control panel (/demo) */
+/* Shared: muted text, reliability meters */
 .muted { color: var(--muted); }
-.demo-buttons { display: flex; flex-direction: column; gap: 12px; }
-.demo button { font-size: 1.1rem; padding: 16px; border-radius: 10px; background: var(--accent); border: none; font-weight: 700; }
-.demo button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--muted); }
 .meter { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 12px; margin: 10px 0; }
 .bar { height: 16px; background: var(--panel); border-radius: 8px; overflow: hidden; }
 .fill { height: 100%; background: #34c759; transition: width 0.3s; }
