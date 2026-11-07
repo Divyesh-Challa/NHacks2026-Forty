@@ -73,13 +73,42 @@ def check_invariants(im: InputManager, before, changes: list[ModeChangeEvent], t
     assert set(mapping.values()) <= set(GESTURE_SOURCE), f"{tag}: unknown gesture in {mapping}"
 
 
+def check_health_rule(prev: dict[str, bool], im: InputManager, hist: dict[str, list[float]], signals, tag: str) -> None:
+    """Health changes only on a full window: 10 readings < cutoff to lose, 20 readings >= recover_cutoff to regain."""
+    for source in set(prev) | set(im.healthy):
+        if source not in signals:
+            assert im.healthy.get(source) == prev.get(source), f"{tag}: {source} health changed without a reading"
+            continue
+        readings = hist[source]
+        if len(readings) == 1:  # the first reading seeds health
+            assert im.healthy[source] == (readings[0] >= CFG["reliability_cutoff"]), f"{tag}: bad seed for {source}"
+            continue
+        expected = prev[source]
+        if expected and len(readings) >= CFG["remap_window"]:
+            if all(r < CFG["reliability_cutoff"] for r in readings[-CFG["remap_window"]:]):
+                expected = False
+        elif not expected and len(readings) >= CFG["recover_window"]:
+            if all(r >= CFG["recover_cutoff"] for r in readings[-CFG["recover_window"]:]):
+                expected = True
+        assert im.healthy[source] == expected, (
+            f"{tag}: {source} health {prev[source]} -> {im.healthy[source]}, expected {expected}; "
+            f"last readings {readings[-CFG['recover_window']:]}"
+        )
+
+
 @pytest.mark.parametrize("seed", SEEDS)
 def test_random_sequences_keep_invariants(seed: int) -> None:
     im = InputManager(cfg=dict(CFG))
+    hist: dict[str, list[float]] = {}
     for i, signals in enumerate(gen_sequence(seed)):
         before = snapshot(im)
+        prev = dict(im.healthy)
+        for src, r in signals.items():
+            hist.setdefault(src, []).append(r)
         changes = step(im, signals)
-        check_invariants(im, before, changes, f"seed={seed} step={i}")
+        tag = f"seed={seed} step={i}"
+        check_invariants(im, before, changes, tag)
+        check_health_rule(prev, im, hist, signals, tag)
 
 
 def scan_select_is_ambiguous(im: InputManager) -> bool:
@@ -117,12 +146,31 @@ def test_hover_between_cutoffs_never_flips_mapping() -> None:
 
 # --- known gaps (real findings, app code deliberately untouched) ---
 
-@pytest.mark.xfail(strict=True, reason="scan mode with NO healthy candidate falls back to max live reliability, so hovering flips SELECT")
-def test_hover_all_unhealthy_scan_keeps_select() -> None:
+def scan_all_unhealthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
         step(im, {"eog_h": 0.3, "blink": 0.3, "jaw": 0.3})
-    assert im.mode == "scan"
+    return im
+
+
+def scan_blink_and_brow_healthy() -> InputManager:
+    im = InputManager(cfg=dict(CFG))
+    for _ in range(10):
+        step(im, {"eog_h": 0.3, "jaw": 0.3, "blink": 0.7, "brow": 0.65})
+    return im
+
+
+def test_probe_setups_reach_intended_state() -> None:
+    im = scan_all_unhealthy()
+    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "blink", "jaw"))
+    im = scan_blink_and_brow_healthy()
+    assert im.mode == "scan" and im.healthy["blink"] and im.healthy["brow"]
+    assert not im.healthy["eog_h"] and not im.healthy["jaw"]
+
+
+@pytest.mark.xfail(strict=True, reason="scan mode with NO healthy candidate falls back to max live reliability, so hovering flips SELECT")
+def test_hover_all_unhealthy_scan_keeps_select() -> None:
+    im = scan_all_unhealthy()
     before = im.current_mapping()["SELECT"]
     step(im, {"eog_h": 0.74, "blink": 0.6, "jaw": 0.6})
     step(im, {"eog_h": 0.6, "blink": 0.74, "jaw": 0.6})
@@ -131,11 +179,7 @@ def test_hover_all_unhealthy_scan_keeps_select() -> None:
 
 @pytest.mark.xfail(strict=True, reason="scan mode with 2+ healthy candidates (e.g. blink and brow) re-picks SELECT by live reliability")
 def test_hover_two_healthy_scan_candidates_keeps_select() -> None:
-    im = InputManager(cfg=dict(CFG))
-    step(im, {"eog_h": 0.3, "jaw": 0.3, "blink": 0.7, "brow": 0.65})  # blink and brow healthy via first reading
-    for _ in range(9):
-        step(im, {"eog_h": 0.3, "jaw": 0.3, "blink": 0.7, "brow": 0.65})
-    assert im.mode == "scan" and im.healthy["blink"] and im.healthy["brow"]
+    im = scan_blink_and_brow_healthy()
     before = im.current_mapping()["SELECT"]
     step(im, {"blink": 0.62, "brow": 0.74})
     assert im.current_mapping()["SELECT"] == before
