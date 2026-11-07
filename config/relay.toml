@@ -1,0 +1,29 @@
+# Relay tunables — the single source of truth for thresholds and timings.
+# Loaded by backend (backend/app/config.py) and signal service (signal/config.py).
+# The frontend reads the [ui] section from GET /config.
+
+[input]
+reliability_cutoff = 0.6     # below this a signal is unreliable
+recover_cutoff = 0.75        # must stay at/above this to switch back (hysteresis)
+remap_window = 10            # attempts below cutoff before remapping
+recover_window = 20          # attempts above recover_cutoff before switching back
+debounce_ms = 300            # ignore duplicate commands within this window
+help_hold_ms = 2000          # HELP gesture must be held this long
+help_repeat_count = 3        # ...or repeated this many times
+help_repeat_window_ms = 3000
+
+[ui]
+scan_interval_ms = 1500
+
+[signal]
+sample_rate_hz = 500
+eog_lowpass_hz = 10.0
+eog_highpass_hz = 0.1
+emg_band_hz = [20.0, 150.0]
+notch_hz = 60.0
+refractory_ms = 400
+reliability_interval_ms = 1000
+
+[predict]
+timeout_s = 2.0
+max_recent_messages = 5
