@@ -1,4 +1,4 @@
-.PHONY: setup backend signal signal-hw plot calibrate frontend frontend-https test demo-check
+.PHONY: gates setup backend signal signal-hw plot calibrate frontend frontend-https test demo-check
 
 setup:
 	cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -38,3 +38,7 @@ test:
 # Plays the 3-step stage demo against a throwaway backend; prints PASS/FAIL per step.
 demo-check:
 	backend/.venv/bin/python scripts/demo_check.py
+
+# The agent loop's definition of done (tests, build, lint, demo-check). `scripts/gates.sh quick` skips demo-check.
+gates:
+	scripts/gates.sh
