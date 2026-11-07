@@ -1,7 +1,8 @@
 // Patient screen: boards -> phrase -> TTS. Works with keyboard sim alone; backend optional.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { LetterBoard, SPELL_DELETE, SPELL_ITEMS, SPELL_SPACE, SPELL_SPEAK } from '../components/LetterBoard'
+import { LetterBoard } from '../components/LetterBoard'
+import { SPELL_DELETE, SPELL_ITEMS, SPELL_SPACE, SPELL_SPEAK } from '../lib/spell'
 import { ModeBanner } from '../components/ModeBanner'
 import { PredictionStrip } from '../components/PredictionStrip'
 import { ScanBoard } from '../components/ScanBoard'
@@ -41,8 +42,10 @@ export default function Patient() {
   const [command, setCommand] = useState<{ command: Command; id: number } | null>(null)
   const [modeChange, setModeChange] = useState<ModeChangeEvent | null>(null)
   const [spoken, setSpoken] = useState<string[]>([])
-  const [predictions, setPredictions] = useState<string[]>([])
-  const [predicting, setPredicting] = useState(false)
+  // Predictions remember which (patient, spoken) they answer; a mismatch means a request is in flight.
+  const [prediction, setPrediction] = useState<{ id: string; spoken: string[]; phrases: string[] } | null>(null)
+  const predictions = prediction?.phrases ?? []
+  const predicting = !prediction || prediction.id !== id || prediction.spoken !== spoken
   const [spelled, setSpelled] = useState('')
   const [helpActive, setHelpActive] = useState(false)
   const [connected, setConnected] = useState(false)
@@ -75,11 +78,10 @@ export default function Patient() {
   // Refresh suggestions after every spoken message (and on load).
   useEffect(() => {
     let cancelled = false
-    setPredicting(true)
+    const done = (phrases: string[]) => !cancelled && setPrediction({ id, spoken, phrases })
     predict(id, [...spoken].reverse())
-      .then((r) => !cancelled && setPredictions(r.phrases))
-      .catch(() => !cancelled && setPredictions([]))
-      .finally(() => !cancelled && setPredicting(false))
+      .then((r) => done(r.phrases))
+      .catch(() => done([]))
     return () => {
       cancelled = true
     }

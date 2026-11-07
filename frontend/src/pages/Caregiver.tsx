@@ -1,5 +1,5 @@
 // Caregiver screen (mobile-friendly): login, live alerts, history, phrase editor, reliability chart.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { BoardEditor } from '../components/BoardEditor'
 import { alertsUnlocked, playHelpAlert, unlockAlerts } from '../lib/alertSound'
 import { ReliabilityChart, type ReliabilityPoint } from '../components/ReliabilityChart'
@@ -71,9 +71,6 @@ export default function Caregiver() {
     setSoundOn(true)
     if (notifyState === 'default') Notification.requestPermission().then(setNotifyState)
   }
-  const tabRef = useRef(tab)
-  tabRef.current = tab
-
   const logout = useCallback(() => {
     localStorage.removeItem('relay_token')
     setToken(null)
