@@ -116,6 +116,7 @@ Keep `https://<LAN IP>:5173/demo` on the presenter device. The audience sees the
 **Step 2: eyes decline, switch to jaw scan.**
 - Presenter: press **Degrade eyes** on `/demo`.
 - Audience sees: the banner **"Eye movement and blinking reliability fell below 60%. Switching to scan mode with jaw clench to select."** The board changes to scan mode. Jaw clench now selects.
+- Known issue until the single-banner fix lands: eye movement and blink can drop a few seconds apart. You may first see **"Eye movement reliability fell below 60%. Switching to double blink and jaw clench."** (still split mode), then the scan banner 5 to 10 s later. Keep talking; don't press anything again.
 - Timing: Relay switches after **10 readings in a row below 60%**. The signal service sends one reliability reading per second (`reliability_interval_ms = 1000` in `config/relay.toml`), so the rule itself takes about 10 s. The README measured about **19 s** from the click to the switch on the synthetic source, because the rolling accuracy window has to fall first. Expect 15 to 20 s on stage.
 - Wearer: finish the next message with a jaw clench.
 
