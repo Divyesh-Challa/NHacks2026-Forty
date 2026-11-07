@@ -2,6 +2,6 @@ numpy>=1.26
 scipy>=1.13
 websockets>=13.0
 pyserial>=3.5
-brainflow>=5.12
+matplotlib>=3.8
 python-dotenv>=1.0
 pytest>=8.0

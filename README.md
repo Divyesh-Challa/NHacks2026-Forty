@@ -7,7 +7,7 @@ Built at natHacks 2026 (Healthcare & Accessibility). All data is synthetic.
 ## Architecture
 
 ```
-Sources (EXG pills via Arduino, Muse 2 via BrainFlow, synthetic)
+Sources (EXG pills via Arduino, synthetic generator)
    │ raw samples
 signal/   filters → gesture detectors → per-signal reliability
    │ gesture + reliability events   (WS /ws/signal)
@@ -33,7 +33,7 @@ make test
 
 **Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: ←/→ = LEFT/RIGHT, Space = SELECT, Backspace = BACK, hold H for 2 s = HELP, M = toggle split/scan. The patient page also works with the backend offline.
 
-**With hardware:** flash `arduino/relay_exg/relay_exg.ino`, then `cd signal && .venv/bin/python run.py --source arduino --port /dev/tty.usbmodemXXXX`. For Muse 2: `--source muse`. *(TODO: Role B)*
+**With hardware:** flash `arduino/relay_exg/relay_exg.ino`, then `cd signal && .venv/bin/python run.py --source arduino --port /dev/tty.usbmodemXXXX`. *(TODO: Role B)*
 
 **Demo degrade:** `curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d '{"signal":"eog_h","factor":0.3}'`
 
@@ -48,4 +48,4 @@ make test
 
 ## Credits
 
-*(TODO: team, libraries: FastAPI, React, Vite, NumPy/SciPy, BrainFlow, Upside Down Labs BioAmp EXG Pill, Anthropic API.)*
+*(TODO: team, libraries: FastAPI, React, Vite, NumPy/SciPy, Upside Down Labs BioAmp EXG Pill, Anthropic API.)*

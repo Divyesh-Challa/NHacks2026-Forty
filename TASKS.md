@@ -32,9 +32,10 @@ Both of you produce the same output: dicts from `signal/messages.py`, yielded by
 - [ ] `signal/sources/arduino_serial.py`: parse `t_us,a0,a1,a2`
 - [ ] `filters.py` (EOG low-pass + drift, EMG bandpass + notch + RMS) and `detectors.py` (thresholds, refractory period, confidence), with tests
 
-**B2: Lawrence: Muse, synthetic data, reliability, calibration**
+**B2: Lawrence: synthetic data, signal tooling, reliability, calibration**
 - [ ] `signal/sources/synthetic.py`: real waveforms (EOG steps, blink spikes, EMG bursts, drift, 60 Hz) + `degrade()`, so B1's detectors can be tested without hardware
-- [ ] `signal/sources/muse_brainflow.py`: confirm the BrainFlow board ID for the dongle; blinks from AF7/AF8, jaw from high-frequency content
+- [ ] `signal/tools/plot_live.py`: live plot of raw + filtered channels from the Arduino (or a recorded CSV), for tuning thresholds and electrode placement with Nathaniel
+- [ ] Record CSV sessions of real gestures (look L/R, blink, clench, rest) so detectors can be tested offline
 - [ ] `reliability.py`: rolling-window `r = accuracy × (1 − false_trigger_rate)`
 - [ ] `calibration.py`: guided prompts → POST `/calibration`; **log accuracy numbers for the pitch**
 
