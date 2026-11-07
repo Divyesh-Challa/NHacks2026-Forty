@@ -132,13 +132,13 @@ Keep `https://<LAN IP>:5173/demo` on the presenter device. The audience sees the
 ## Reset between run-throughs
 
 1. On `/demo`, press **Restore all**.
-2. Wearer: keep looking left and right and double-blinking at full effort until split returns. Reliability only moves on attempts.
-3. Wait for recovery. Relay switches back to split only after **20 readings in a row at or above 75%**, about 20 s at one reading per second, plus the time the wearer needs to make the attempts. The README measured about 23 s on the synthetic source.
-4. On `/demo`, the run sheet says "Back to split after 20 readings above 75%". The **Switches** box shows the switch back.
-5. Clean up the other screens:
+2. If you pressed **M** during the run, the switch back will not show. Once the `/demo` eye meters read above 75% (Steady or Spare), press **M** once on the patient screen. That clears the override. Pressing M earlier leaves a hidden override that can stop the next Degrade from switching to scan.
+3. Wearer: keep looking left and right and double-blinking at full effort until split returns. Reliability only moves on attempts.
+4. Wait for recovery. Relay switches back to split only after **20 readings in a row at or above 75%**, about 20 s at one reading per second, plus the time the wearer needs to make the attempts. The README measured about 23 s on the synthetic source.
+5. On `/demo`, the run sheet says "Back to split after 20 readings above 75%". The **Switches** box shows the switch back.
+6. Clean up the other screens:
    - On the patient screen, click the "HELP sent to caregiver" overlay to dismiss it.
    - On the caregiver phone, tap the red **HELP requested** banner to acknowledge it.
-   - If you pressed **M** during the run, press **M** again. The manual override does not clear itself.
 
 ## Fallbacks
 
@@ -171,13 +171,20 @@ The arrow keys and Space only change the patient screen. They never reach the si
    ```
 
 3. Wait about 15 s. In a live test one line was enough: a single banner, "…Switching to scan mode with jaw clench to select.", about 10 s after the line. If it has not appeared after 15 s, type the line again (up to three times).
-4. Expect about 25% of the typed attempts to be detected. Those move the patient screen as normal commands, so the board will move while you type. That is expected.
+4. Then click back into the patient screen so ←/→/Space/H reach it. Otherwise H presses go to terminal 3.
+5. Expect about 25% of the typed attempts to be detected. Those move the patient screen as normal commands, so the board will move while you type. That is expected.
 
 *Reset with the keyboard:*
 1. Press **Restore all** on `/demo`.
 2. In terminal 3, type `lrlrlrbbbbbb` and press Enter, about every 15 s, until eye-movement split returns. The accuracy window needs fresh good attempts to refill. In a live test it took three lines and about 35 s, passing through "…Switching back to double blink and jaw clench" before "…Switching back to eye movement."
+3. Then click back into the patient screen so ←/→/Space/H reach it.
 
-*Expect stray commands.* Even with `--script none`, the simulated detector produces about one false trigger every 30 s while the signal is at rest. In scan mode a stray jaw clench is a SELECT and can speak a phrase. Keep going if it happens. Do not explain it away in front of the audience. Press BACK if it matters.
+*Expect stray commands.* Even with `--script none`, the simulated detector produces false triggers:
+- At full gain, about one stray command every 30 s.
+- After Degrade eyes, about one every 9 s, mostly eye gestures.
+- The one that matters in scan mode is a stray jaw clench (SELECT), roughly once every 100 s. It can speak a phrase.
+
+Keep going if it happens. Do not explain it away in front of the audience. Press BACK if it matters.
 
 Do **not** use **M** to switch to scan for this step. It works, but the banner reads "Switched to scan mode by hand (testing)", which is not the demo.
 
@@ -197,10 +204,10 @@ make backend              # in terminal 1, after Ctrl+C
 
 **3. No venue Wi-Fi → phone hotspot.**
 
-Use this fallback when the venue Wi-Fi is down or when the phone cannot load the Network URL even though it shows Wi-Fi as connected. Venue Wi-Fi with client isolation does this: the laptop and the phone are on the same network, but cannot reach each other.
+Use this fallback when the venue Wi-Fi is down, or when the phone cannot load the Network URL even though it shows Wi-Fi as connected. The second case is client isolation: the laptop and the phone are on the same network but cannot reach each other. If the hotspot is not possible either, skip the live HELP step and say so on stage.
 
 1. Turn on the phone's personal hotspot.
-2. Join the stage laptop and the presenter device to it. The phone that hosts the hotspot does not need to join.
+2. Join the stage laptop, the presenter device and the caregiver phone (unless the caregiver phone is the one hosting the hotspot) to it. Without the caregiver phone on the hotspot, HELP is lost.
 3. Find the laptop's new address:
 
    ```bash
@@ -213,8 +220,6 @@ Use this fallback when the venue Wi-Fi is down or when the phone cannot load the
    - Presenter device: open `https://<new IP>:5173/demo` and accept the certificate again.
    - Projector: nothing to do. It uses `https://localhost:5173`, which the new IP does not change. Only re-pair the projector if it was opened on the LAN IP instead of localhost.
 5. The dev server listens on all interfaces, so it does not need a restart. Restart `make frontend-https` only if you want the Network line printed again.
-
-If the phone still cannot load `https://<new IP>:5173` while both devices show a connection, the network is isolating clients. Move everything to the phone hotspot as above. If that is not possible, skip the live HELP step and say so on stage.
 
 **4. Phone notifications blocked.**
 
