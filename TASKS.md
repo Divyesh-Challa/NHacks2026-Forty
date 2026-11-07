@@ -10,6 +10,18 @@ Every file that still needs work has a `SCAFFOLD STATUS` / `TODO (Role X)` heade
 
 ---
 
+## Loop queue (agent loop: `/loop /orchestrate`)
+The orchestrator takes the first unchecked item that isn't tagged `[you]` or `[hw]`, gives it to the named specialist, and opens a PR for a human to merge. Add items here, most important first. Write each one so a newcomer could prove it's done.
+
+- [ ] `frontend-engineer` Fix the oxlint warning `react(set-state-in-effect)` at `frontend/src/pages/Patient.tsx:78` without changing behaviour. Proof: `npm run lint` shows no warnings; the keyboard flow (←/→/Space, M to toggle mode) still works in a headless check
+- [ ] `verifier` Property test for the input manager: seeded random reliability sequences (500+) never break its invariants. Split mode always maps LEFT and RIGHT; scan mode always maps SELECT; `mode_change` only when the mode or a primary control changes; values hovering between 0.6 and 0.75 never flip the mapping; HELP is `jaw_hold` whenever jaw is healthy. Proof: the new test passes, and fails when the hysteresis check in `_all_last` is deliberately broken
+- [ ] `frontend-engineer` Pairing: the patient page reads the token `/pair` stored (`relay_patient_token`), sends it as `?token=` on `/ws/patient/{id}`, and shows "Paired" or "Not paired · open /pair" in the header. It must keep working with no token, since the stage demo doesn't pair. Proof: screenshots of both states; gates pass
+- [ ] `docs` Stage runbook `docs/RUNBOOK.md`: which laptop and phone run what, every command in order, the `/demo` page, the caregiver phone setup, and fallbacks (electrodes fail → synthetic + keyboard; backend crash → restart; no venue Wi-Fi → phone hotspot). Proof: every command was run or checked against the Makefile
+- [ ] `[you]` `backend-engineer` + `signal-engineer` Usage errors lower reliability (CLAUDE.md: a BACK right after a selection counts as a likely error). Needs a new backend → signal message, which is a **contract change**: approve the message shape first
+- [ ] `[hw]` Everything under Role B that says "real electrodes"
+
+---
+
 ## Role A: Backend core + Input manager (owner: Divyesh)
 The core feature. Done = demo step 2 works with the synthetic source and the degrade toggle.
 - [x] `backend/app/input_manager.py`, TDD against `backend/tests/test_input_manager.py` (20 tests)
@@ -21,7 +33,7 @@ The core feature. Done = demo step 2 works with the synthetic source and the deg
 - [x] `db.py`: SQLModel tables + seed on startup
 - [x] `/demo/degrade` accepts `"eye"` (eog_h + blink) for the one-call stage demo
 - [x] `/demo` presenter page: degrade/restore buttons + live reliability, mode and mapping
-- [ ] README "Technical decisions": remap and hysteresis rules
+- [x] README "Technical decisions": remap and hysteresis rules
 
 ## Role B: Signal service + hardware (owners: Nathaniel + Lawrence)
 Done = gestures from real electrodes reach the backend; calibration numbers recorded.
