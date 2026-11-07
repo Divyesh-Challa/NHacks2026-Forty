@@ -29,6 +29,7 @@ make backend              # http://localhost:8000  (terminal 1)
 make frontend             # http://localhost:5173  (terminal 2)
 make signal               # synthetic gestures     (terminal 3, optional)
 make test
+make demo-check         # plays the 3 stage-demo steps end to end; run before the pitch
 ```
 
 **Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: ←/→ = LEFT/RIGHT, Space = SELECT, Backspace = BACK, hold H for 2 s = HELP, M = toggle split/scan. The patient page also works with the backend offline.
