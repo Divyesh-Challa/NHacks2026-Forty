@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from . import db
 from .input_manager import InputManager
-from .models import AlertEvent, GestureEvent, SignalReliabilityEvent, SpokenEvent
+from .models import AlertEvent, GestureEvent, ModeChangeEvent, SignalReliabilityEvent, SpokenEvent
 
 log = logging.getLogger("relay.ws")
 router = APIRouter()
@@ -76,8 +76,14 @@ async def ws_signal(ws: WebSocket, patient_id: str = "p1") -> None:
                 log.info("gesture %s/%s %.2f", ev.source.value, ev.gesture.value, ev.confidence)
                 for cmd in im.on_gesture(ev):
                     await hub.to_patient(patient_id, cmd)
+                    if cmd.command.value == "HELP":
+                        alert = AlertEvent(patient_id=patient_id, message="HELP", ts=cmd.ts)
+                        db.add_message(patient_id, _dump(alert))
+                        await hub.to_caregiver(patient_id, alert)
             elif msg.get("type") == "reliability":
                 for out in im.on_reliability(SignalReliabilityEvent.model_validate(msg)):
+                    if isinstance(out, ModeChangeEvent):
+                        log.info("mode_change %s -> %s: %s", out.from_, out.to, out.reason)
                     await hub.to_both(patient_id, out)
     except WebSocketDisconnect:
         hub.signals[patient_id].discard(ws)
