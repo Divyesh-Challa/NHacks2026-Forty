@@ -24,3 +24,5 @@ export const predict = (patient_id: string, recent_messages: string[]) =>
     method: 'POST',
     body: JSON.stringify({ patient_id, recent_messages, time_of_day: new Date().toTimeString().slice(0, 5) }),
   })
+export const degrade = (signal: 'eye' | 'eog_h' | 'blink' | 'jaw', factor: number) =>
+  json<{ ok: boolean; signals: string[] }>('/demo/degrade', { method: 'POST', body: JSON.stringify({ signal, factor }) })
