@@ -50,7 +50,7 @@ Calibration prints the accuracy table we quote in the pitch and keeps a copy in 
 - Plain `make frontend` also works on the phone, since every request goes through the dev server's `/api` proxy, but phone browsers block notifications without HTTPS. You still get the sound, vibration and the red banner.
 - iPhone Safari only shows web notifications for sites added to the Home Screen. Rely on the sound and banner there.
 
-**Demo controls:** open `http://localhost:5173/demo` on a second laptop or phone (not the projector). It has buttons for "Degrade eyes → jaw scan", "Degrade eye movement only" and "Restore all", plus live reliability bars, the current mode and mapping, and recent switches.
+**Demo controls:** open `http://localhost:5173/demo` on a second laptop or phone (not the projector). It has buttons for "Degrade eyes", "Eye movement only" and "Restore all". The page shows a run sheet, a countdown to the next remap ("Low n of 10", then "N more low readings"), live reliability bars with marks at the 60% switch and 75% recovery cutoffs, the current mode and mapping, and a log of recent switches. The stage steps are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 **Demo degrade from the terminal (stage step 2):** this degrades both eye signals, so Relay switches from eye-movement split mode to jaw-clench scan mode after about 20 s:
 
