@@ -17,6 +17,7 @@ CFG = {
     "remap_window": 10,
     "recover_window": 20,
     "debounce_ms": 300,
+    "merge_window": 12,
 }
 RIG = ("eog_h", "eog_v", "blink", "jaw")
 SEEDS = range(600)
@@ -96,10 +97,34 @@ def check_health_rule(prev: dict[str, bool], im: InputManager, hist: dict[str, l
         )
 
 
-@pytest.mark.parametrize("seed", SEEDS)
-def test_random_sequences_keep_invariants(seed: int) -> None:
+def target(im: InputManager) -> tuple[str, dict[str, str | None]]:
+    """Mode and primary controls the current health calls for, i.e. what a held remap will apply."""
+    mode, mapping = im._choose()
+    return mode, {k: mapping.get(k) for k in PRIMARY}
+
+
+def check_merge_window(im: InputManager, held_since: int | None, i: int, changes, tag: str) -> int | None:
+    """A remap may lag health only while held, and is announced within merge_window readings.
+
+    Returns the step the current lag started at (None if the mapping matches health).
+    """
+    lagging = snapshot(im) != target(im)
+    if changes:
+        assert not lagging, f"{tag}: announced {snapshot(im)} but health calls for {target(im)}"
+    if not lagging:
+        return None
+    assert im.remap_held, f"{tag}: mapping {snapshot(im)} lags health {target(im)} without a held remap"
+    held_since = i if held_since is None else held_since
+    assert i - held_since < CFG["merge_window"], f"{tag}: remap held since step {held_since}"
+    return held_since
+
+
+def run_sequence(seed: int) -> bool:
+    """Check every invariant along one random sequence; returns True if a remap was ever held."""
     im = InputManager(cfg=dict(CFG))
     hist: dict[str, list[float]] = {}
+    held_since: int | None = None
+    held = False
     for i, signals in enumerate(gen_sequence(seed)):
         before = snapshot(im)
         prev = dict(im.healthy)
@@ -109,17 +134,36 @@ def test_random_sequences_keep_invariants(seed: int) -> None:
         tag = f"seed={seed} step={i}"
         check_invariants(im, before, changes, tag)
         check_health_rule(prev, im, hist, signals, tag)
+        held_since = check_merge_window(im, held_since, i, changes, tag)
+        held = held or held_since is not None
+    return held
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_random_sequences_keep_invariants(seed: int) -> None:
+    run_sequence(seed)
+
+
+def test_random_sequences_exercise_the_merge_window() -> None:
+    held = sum(run_sequence(seed) for seed in SEEDS)  # 402 of 600 at the time of writing
+    assert held >= 300, f"only {held} of {len(SEEDS)} seeds held a remap"
 
 
 def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
     """Random warm-up, then every reading in [0.6, 0.75): health cannot change, so neither can the mapping.
 
+    A remap held at the end of the warm-up lands first (within merge_window readings).
     Returns True if the warm-up ended in scan mode, i.e. the hover phase exercised the sticky SELECT.
     """
     rng = random.Random(seed)
     im = InputManager(cfg=dict(CFG))
     for warm in gen_sequence(seed, signals, steps=60):
         step(im, warm)
+    for i in range(CFG["merge_window"] + 1):
+        if not im.remap_held:
+            break
+        step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
+    assert not im.remap_held, f"hover seed={seed}: remap still held after {CFG['merge_window']} readings"
     frozen = (dict(im.healthy), im.current_mapping(), im.mode)
     in_scan = im.mode == "scan"
     for i in range(HOVER_STEPS):
