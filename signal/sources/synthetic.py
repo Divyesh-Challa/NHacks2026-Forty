@@ -27,8 +27,7 @@ class SyntheticSource:
         self.gain[signal] = factor
 
     async def events(self) -> AsyncIterator[dict]:
-        for i, (source, name) in enumerate(itertools.cycle(SCRIPT)):
+        for source, name in itertools.cycle(SCRIPT):
             await asyncio.sleep(self.interval_s)
             yield messages.gesture(source, name, 0.9 * self.gain.get(source, 1.0))
-            if i % 2 == 0:
-                yield messages.reliability({s: min(1.0, 0.9 * g) for s, g in self.gain.items()})
+            yield messages.reliability({s: min(1.0, 0.9 * g) for s, g in self.gain.items()})

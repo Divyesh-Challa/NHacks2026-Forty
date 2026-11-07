@@ -35,7 +35,14 @@ make test
 
 **With hardware:** flash `arduino/relay_exg/relay_exg.ino`, then `cd signal && .venv/bin/python run.py --source arduino --port /dev/tty.usbmodemXXXX`. *(TODO: Role B)*
 
-**Demo degrade:** `curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d '{"signal":"eog_h","factor":0.3}'`
+**Demo degrade (stage step 2):** this degrades both eye signals, so Relay switches from eye-movement split mode to jaw-clench scan mode after about 10 s:
+
+```bash
+curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d '{"signal":"eye","factor":0.3}'
+# restore: same call with "factor": 1.0.  Single signals also work: "eog_h", "blink", "jaw"
+```
+
+The database is `backend/relay.db`, created and seeded with fake data on first start. Delete it to reset.
 
 ## Demo credentials
 
@@ -44,7 +51,17 @@ make test
 
 ## Technical decisions
 
-*(TODO: filters, detector thresholds, reliability formula `r = accuracy × (1 − false_trigger_rate)`, remap and hysteresis rules, and the reasons for each, plus calibration accuracy numbers.)*
+### Input manager (`backend/app/input_manager.py`)
+
+- **Health per signal, not per reading.** Every reliability reading for a signal counts as one attempt. A healthy signal becomes unhealthy only after **10 consecutive readings below 0.6**. One bad second never takes away a control the person is using.
+- **Hysteresis.** An unhealthy signal is trusted again only after **20 consecutive readings ≥ 0.75**. The gap between 0.6 and 0.75 plus the longer recovery window keeps a signal hovering near the cutoff from flipping the board back and forth (tested in `test_no_flapping_around_cutoff`).
+- **Mode choice.** Split mode uses the first healthy pair from: look left/right → blink + jaw clench → eyebrow + jaw clench. With no healthy pair, scan mode uses the most reliable healthy gesture as SELECT.
+- **Announcements.** A `mode_change` with a plain-language reason (e.g. "Eye movement reliability fell below 60%. Switching to double blink and jaw clench.") goes out only when the mode or a primary control changes. Losing an optional extra like BACK changes nothing on screen.
+- **HELP** is a sustained jaw clench (`jaw_hold`, ~2 s), confirmed in the detector, so an ordinary clench can never raise a false alarm. In scan mode HELP is also a scan item.
+- **Debounce.** A repeated command within 300 ms is dropped, per command.
+- The logic is pure Python with no I/O, so it's covered by unit tests.
+
+*(TODO: filters, detector thresholds, reliability formula `r = accuracy × (1 − false_trigger_rate)`, and calibration accuracy numbers.)*
 
 ## Credits
 
