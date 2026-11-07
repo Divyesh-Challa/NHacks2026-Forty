@@ -61,6 +61,8 @@ curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d 
 
 The database is `backend/relay.db`, created and seeded with fake data on first start. Delete it to reset.
 
+**Stage day:** [docs/RUNBOOK.md](docs/RUNBOOK.md) has the device setup, the pre-show checklist, the 3-step pitch and the fallbacks.
+
 ## Demo credentials
 
 - Caregiver: `caregiver@example.com` / `relay-demo` (or whatever `DEMO_CAREGIVER_PASSWORD` is set to in `.env`)
