@@ -252,6 +252,21 @@ def test_force_mode_to_the_current_mode_applies_a_held_remap() -> None:
     assert im.force_mode("split") is None
 
 
+def test_force_mode_to_the_current_mode_lands_a_held_split_to_scan_remap() -> None:
+    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
+    for i in range(12):  # blink fails first (BACK only), then eog_h while jaw is part-way into a low run
+        feed(im, 1, eog_h=0.3 if i >= 2 else 0.9, blink=0.3, jaw=0.3 if i >= 8 else 0.9)
+    assert im.remap_held and im.mode == "split" and primary(im) == LOOK
+    change = im.force_mode("split")
+    assert change is not None and (change.from_, change.to) == ("split", "scan")
+    assert change.reason == EYE_TO_JAW
+    assert im.override is None and not im.remap_held
+    assert im.current_mapping() == {"SELECT": "jaw_clench", "HELP": "jaw_hold"}
+    for _ in range(25):  # jaw recovers: the board stays on jaw scan, never the dead eye fallback
+        feed(im, 1, eog_h=0.3, blink=0.3, jaw=0.9)
+        assert im.mode == "scan" and im.current_mapping()["SELECT"] == "jaw_clench"
+
+
 # --- merge window: only a streak under way holds a remap, never a steady hover ---
 
 def test_shaky_jaw_does_not_delay_an_eye_loss() -> None:

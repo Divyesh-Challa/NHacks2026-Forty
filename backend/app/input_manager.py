@@ -22,8 +22,11 @@ How it decides:
     that run completes (and joins the banner), when the run breaks, or when the window ends. So the
     eye degrade (eog_h and blink failing a few readings apart) gives one split -> scan banner naming
     both, while a lone loss, or one next to a signal steadily hovering between the cutoffs, is
-    applied at once. The health rule itself is never delayed; while held, the old mode and
-    LEFT/RIGHT/SELECT stay and only BACK/HELP follow health. Readings (reliability events) are the clock.
+    applied at once. A hold lasts at most 12 readings (`merge_window`); at most 9 when the only run
+    being waited on is a loss (a run already under way finishes within `remap_window` - 1 more
+    readings; a pending regain run, or another run starting later, can keep it open up to 12).
+    The health rule itself is never delayed; while held, the old mode and LEFT/RIGHT/SELECT stay and
+    only BACK/HELP follow health. Readings (reliability events) are the clock.
   - HELP = jaw_hold, which the detector only emits after a sustained (~help_hold_ms) clench,
     so a short clench can never raise HELP. In scan mode HELP is also a scan item.
 """
@@ -184,16 +187,17 @@ class InputManager:
         return self._held_since is not None
 
     def force_mode(self, mode: Mode, reason: str | None = None) -> ModeChangeEvent | None:
-        """Manual mode toggle. Asking for the current mode lands a held remap (with its own reason)."""
-        if mode == self.mode and not self.remap_held:
-            return None
-        same = mode == self.mode
+        """Manual mode toggle. Asking for the current mode lands a held remap (with its own reason).
+
+        That request leaves `override` alone: pinning the current mode could hold the board on a
+        dead mapping (e.g. split on failed eyes when the held remap is to jaw scan).
+        """
+        if mode == self.mode:
+            return self._apply(self._reason()) if self.remap_held else None
         self.override = mode
         auto_mode, _ = self._choose(use_override=False)
         if auto_mode == mode:
             self.override = None
-        if same:
-            return self._apply(self._reason())
         return self._apply(lambda: reason or f"Switched to {mode} mode by hand (testing).")
 
     # --- state out ---
