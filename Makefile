@@ -1,4 +1,4 @@
-.PHONY: setup backend signal frontend frontend-https test
+.PHONY: setup backend signal frontend frontend-https test demo-check
 
 setup:
 	cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -22,3 +22,7 @@ test:
 	cd backend && .venv/bin/pytest -q
 	cd signal && .venv/bin/pytest -q
 	cd frontend && npm run build
+
+# Plays the 3-step stage demo against a throwaway backend; prints PASS/FAIL per step.
+demo-check:
+	backend/.venv/bin/python scripts/demo_check.py
