@@ -16,13 +16,14 @@ How it decides:
     there is no current SELECT. So it changes only on a health change, never on live values.
   - A mode_change is emitted when the mode or a primary control (LEFT/RIGHT/SELECT) changes.
   - Merge window: when a health change would move a primary control while another mapping signal
-    looks likely to follow (healthy but reading below `recover_cutoff`, or unhealthy but reading
-    >= `reliability_cutoff`), the remap is held for up to `merge_window` readings, or until no
-    signal looks likely to follow. Changes in the window join it, so the eye degrade (eog_h and
-    blink failing a few readings apart) gives one split -> scan banner naming both. The health rule
-    itself is never delayed; while held, the old mode and LEFT/RIGHT/SELECT stay and only BACK/HELP
-    follow health. Readings (reliability events) are the clock. A change with no other signal
-    likely to follow is applied at once, so a lone loss is not delayed.
+    is part-way through its own health-changing run (healthy with a run below `reliability_cutoff`
+    that can reach `remap_window`, or unhealthy with a run at/above `recover_cutoff` that can reach
+    `recover_window`, before `merge_window` readings have passed), the remap is held. It lands when
+    that run completes (and joins the banner), when the run breaks, or when the window ends. So the
+    eye degrade (eog_h and blink failing a few readings apart) gives one split -> scan banner naming
+    both, while a lone loss, or one next to a signal steadily hovering between the cutoffs, is
+    applied at once. The health rule itself is never delayed; while held, the old mode and
+    LEFT/RIGHT/SELECT stay and only BACK/HELP follow health. Readings (reliability events) are the clock.
   - HELP = jaw_hold, which the detector only emits after a sustained (~help_hold_ms) clench,
     so a short clench can never raise HELP. In scan mode HELP is also a scan item.
 """
@@ -168,9 +169,7 @@ class InputManager:
         out: list[ReliabilityEvent | ModeChangeEvent] = []
         if self._held_since is None and (lost or regained) and self._would_change() and self._settling():
             self._held_since = self._readings
-        if self._held_since is not None and (
-            self._readings - self._held_since < self.cfg["merge_window"] and self._settling()
-        ):
+        if self._held_since is not None and self._settling():
             self._refresh_extras()
         else:
             change = self._apply(self._reason())
@@ -185,12 +184,16 @@ class InputManager:
         return self._held_since is not None
 
     def force_mode(self, mode: Mode, reason: str | None = None) -> ModeChangeEvent | None:
-        if mode == self.mode:
+        """Manual mode toggle. Asking for the current mode lands a held remap (with its own reason)."""
+        if mode == self.mode and not self.remap_held:
             return None
+        same = mode == self.mode
         self.override = mode
         auto_mode, _ = self._choose(use_override=False)
         if auto_mode == mode:
             self.override = None
+        if same:
+            return self._apply(self._reason())
         return self._apply(lambda: reason or f"Switched to {mode} mode by hand (testing).")
 
     # --- state out ---
@@ -249,21 +252,35 @@ class InputManager:
     def _would_change(self) -> bool:
         return self._changes_primary(*self._choose())
 
-    def _settling(self) -> bool:
-        """Another mapping signal may follow a pending change, so the remap waits for it.
+    def _run(self, source: str, below: bool) -> int:
+        """Length of the source's current run of readings below cutoff (below) or >= recover_cutoff."""
+        n = 0
+        for r in reversed(self._history.get(source, ())):
+            if (r < self.cfg["reliability_cutoff"]) if below else (r >= self.cfg["recover_cutoff"]):
+                n += 1
+            else:
+                break
+        return n
 
-        After a loss: a healthy signal reading below `recover_cutoff` (shaky, may fail next).
-        After a regain: an unhealthy signal reading at or above `reliability_cutoff` (recovering).
+    def _settling(self) -> bool:
+        """Another mapping signal is part-way through a run that can change its health within the window.
+
+        After a loss: a healthy signal with a run below `reliability_cutoff` that can reach
+        `remap_window`. After a regain: an unhealthy signal with a run at/above `recover_cutoff`
+        that can reach `recover_window`. A hover between the cutoffs is no run, so it holds nothing.
         """
+        start = self._readings if self._held_since is None else self._held_since
+        left = start + self.cfg["merge_window"] - self._readings  # readings still inside the window
         pending = set(self._lost) | set(self._regained)
         for s in MAPPING_SOURCES - pending:
-            r = self.reliability.get(s)
-            if r is None:
-                continue
-            if self._lost and self.healthy.get(s, False) and r < self.cfg["recover_cutoff"]:
-                return True
-            if self._regained and not self.healthy.get(s, False) and r >= self.cfg["reliability_cutoff"]:
-                return True
+            if self.healthy.get(s, False):
+                k = self._run(s, below=True)
+                if self._lost and k and self.cfg["remap_window"] - k <= left:
+                    return True
+            else:
+                k = self._run(s, below=False)
+                if self._regained and k and self.cfg["recover_window"] - k <= left:
+                    return True
         return False
 
     def _refresh_extras(self) -> None:
@@ -304,14 +321,19 @@ class InputManager:
                 target = _join([GESTURE_NAMES[self.mapping[k]] for k in ("LEFT", "RIGHT")])
                 if self.mapping["LEFT"] == "look_left":
                     target = "eye movement"
+            fell = back = ""
             if lost:
-                cutoff = f"{self.cfg['reliability_cutoff']:.0%}"
-                who = _join([SOURCE_NAMES.get(s, s) for s in lost])
-                return f"{who[0].upper() + who[1:]} reliability fell below {cutoff}. Switching to {target}."
+                fell = f"{_join([SOURCE_NAMES.get(s, s) for s in lost])} reliability fell below "
+                fell += f"{self.cfg['reliability_cutoff']:.0%}"
             if regained:
-                who = _join([SOURCE_NAMES.get(s, s) for s in regained])
-                verb = "is" if len(regained) == 1 else "are"
-                return f"{who[0].upper() + who[1:]} {verb} reliable again. Switching back to {target}."
-            return f"Switching to {target}."
+                back = f"{_join([SOURCE_NAMES.get(s, s) for s in regained])} "
+                back += f"{'is' if len(regained) == 1 else 'are'} reliable again"
+            if fell and back:
+                why, switch = f"{fell} and {back}", "Switching to"
+            elif fell or back:
+                why, switch = fell or back, "Switching to" if fell else "Switching back to"
+            else:
+                return f"Switching to {target}."
+            return f"{why[0].upper() + why[1:]}. {switch} {target}."
 
         return build

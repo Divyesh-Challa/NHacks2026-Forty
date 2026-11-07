@@ -241,6 +241,66 @@ def test_force_mode_during_a_held_remap_applies_it() -> None:
     assert staggered(im, "eog_h", "blink", gap=0, n=10) == []
 
 
+def test_force_mode_to_the_current_mode_applies_a_held_remap() -> None:
+    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
+    staggered(im, "eog_h", "blink", gap=3, n=10)
+    assert im.remap_held and im.mode == "split"
+    change = im.force_mode("split")
+    assert change is not None and (change.from_, change.to) == ("split", "split")
+    assert change.reason == "Eye movement reliability fell below 60%. Switching to double blink and jaw clench."
+    assert primary(im) == BLINK_JAW and not im.remap_held
+    assert im.force_mode("split") is None
+
+
+# --- merge window: only a streak under way holds a remap, never a steady hover ---
+
+def test_shaky_jaw_does_not_delay_an_eye_loss() -> None:
+    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
+    assert feed(im, 9, eog_h=0.3, blink=0.9, jaw=0.7) == []
+    changes = feed(im, 1, eog_h=0.3, blink=0.9, jaw=0.7)
+    assert [(c.from_, c.to) for c in changes] == [("split", "split")]
+    assert not im.remap_held
+
+
+def test_jaw_loss_remaps_at_once_while_blink_hovers() -> None:
+    im = make(eog_h=0.3, blink=0.9, jaw=0.9)
+    assert primary(im) == BLINK_JAW
+    assert feed(im, 9, eog_h=0.3, blink=0.7, jaw=0.3) == []
+    changes = feed(im, 1, eog_h=0.3, blink=0.7, jaw=0.3)
+    assert [(c.from_, c.to) for c in changes] == [("split", "scan")]
+    assert im.current_mapping() == {"SELECT": "blink_double"}  # dead jaw no longer RIGHT, HELP gone
+
+
+def test_unhealthy_hover_does_not_delay_a_regain() -> None:
+    im = make(eog_h=0.3, blink=0.3, jaw=0.9)
+    assert im.mode == "scan"
+    assert feed(im, 19, eog_h=0.65, blink=0.9, jaw=0.9) == []
+    changes = feed(im, 1, eog_h=0.65, blink=0.9, jaw=0.9)
+    assert [(c.from_, c.to) for c in changes] == [("scan", "split")]
+    assert primary(im) == BLINK_JAW
+
+
+def test_hold_ends_when_the_trailing_run_breaks() -> None:
+    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
+    staggered(im, "eog_h", "blink", gap=3, n=10)  # eog_h lost; blink 7 readings into its run
+    assert im.remap_held
+    changes = feed(im, 1, eog_h=0.3, blink=0.9, jaw=0.9)  # blink recovers: nothing left to wait for
+    assert [(c.from_, c.to) for c in changes] == [("split", "split")]
+    assert primary(im) == BLINK_JAW and not im.remap_held
+
+
+def test_loss_and_regain_in_one_banner_name_both() -> None:
+    im = make(eog_h=0.3, blink=0.9, jaw=0.9)
+    assert primary(im) == BLINK_JAW
+    feed(im, 10, eog_h=0.9, blink=0.9, jaw=0.9)
+    changes = feed(im, 10, eog_h=0.9, blink=0.9, jaw=0.3)  # eog_h regains on jaw's 10th low reading
+    assert len(changes) == 1
+    assert changes[0].reason == (
+        "Jaw clench reliability fell below 60% and eye movement is reliable again. Switching to eye movement."
+    )
+    assert primary(im) == LOOK
+
+
 # --- hysteresis ---
 
 def test_hysteresis_requires_twenty_attempts_above_recover_cutoff() -> None:
