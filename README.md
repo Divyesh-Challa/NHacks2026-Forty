@@ -32,6 +32,8 @@ make test
 make demo-check         # plays the 3 stage-demo steps end to end; run before the pitch
 ```
 
+**Synthetic signals:** `make signal` streams scripted gestures. With `--script none`, it waits for you to type `l`/`r`/`b`/`j`/`h` + Enter in its terminal. `cd signal && .venv/bin/python -m tools.plot_live` shows the raw channels live; press `d` to degrade the eyes. `python -m tools.record` records labelled CSVs.
+
 **Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: ←/→ = LEFT/RIGHT, Space = SELECT, Backspace = BACK, hold H for 2 s = HELP, M = toggle split/scan. The patient page also works with the backend offline.
 
 **With hardware:** flash `arduino/relay_exg/relay_exg.ino`, then `cd signal && .venv/bin/python run.py --source arduino --port /dev/tty.usbmodemXXXX`. *(TODO: Role B)*
@@ -68,7 +70,13 @@ The database is `backend/relay.db`, created and seeded with fake data on first s
 - **Debounce.** A repeated command within 300 ms is dropped, per command.
 - The logic is pure Python with no I/O, so it's covered by unit tests.
 
-*(TODO: filters, detector thresholds, reliability formula `r = accuracy × (1 − false_trigger_rate)`, and calibration accuracy numbers.)*
+### Reliability (`signal/reliability.py`)
+
+- `r = accuracy × (1 − false_trigger_rate)`. Accuracy is measured over the last **8 gesture attempts** per signal, and the false-trigger rate over the last **20 seconds of rest**. Both windows start filled from calibration, so a new session begins at the calibrated value and real use takes over.
+- The synthetic source runs a simulated detector: about 97% of gestures are detected at full strength, about 25% after `degrade(…, 0.3)`, and weaker signals false-trigger more at rest. Reliability on stage therefore falls because gestures are actually being missed.
+- Measured live, with the synthetic source at its default rate: "Degrade eyes" → jaw-clench scan mode in **~19 s**, and restore → eye control in **~23 s** (recovery is intentionally stricter).
+
+*(TODO: filters, detector thresholds, and calibration accuracy numbers.)*
 
 ## Credits
 

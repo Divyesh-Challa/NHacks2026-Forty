@@ -35,10 +35,12 @@ Both of you produce the same output: dicts from `signal/messages.py`, yielded by
 - [ ] **HELP contract:** emit `jaw_hold` only once a clench has lasted ≥ `help_hold_ms` (2 s), and do NOT also emit `jaw_clench` for that same hold. The input manager treats `jaw_hold` as a confirmed HELP.
 
 **B2: Lawrence: synthetic data, signal tooling, reliability, calibration**
-- [ ] `signal/sources/synthetic.py`: real waveforms (EOG steps, blink spikes, EMG bursts, drift, 60 Hz) + `degrade()`, so B1's detectors can be tested without hardware
-- [ ] `signal/tools/plot_live.py`: live plot of raw + filtered channels from the Arduino (or a recorded CSV), for tuning thresholds and electrode placement with Nathaniel
-- [ ] Record CSV sessions of real gestures (look L/R, blink, clench, rest) so detectors can be tested offline
-- [ ] `reliability.py`: rolling-window `r = accuracy × (1 − false_trigger_rate)`. Send a reliability event about once per second: the input manager counts each reading as one attempt, so 10 low readings ≈ 10 s to remap on stage
+- [x] `signal/sources/synthetic.py`: Arduino-format waveforms (EOG steps, blink spikes, EMG bursts, drift, 60 Hz, crosstalk) with ground-truth labels + `degrade()`; live stream uses a simulated detector until `detectors.py` exists
+- [x] `signal/tools/plot_live.py`: live plot from synthetic / Arduino serial / CSV replay (add filtered traces once `filters.py` lands)
+- [x] `signal/tools/record.py`: prompted, labelled CSV sessions
+- [ ] Record real sessions with the electrodes: `python -m tools.record --source serial --port … --reps 10`
+- [x] `reliability.py`: `ReliabilityTracker`, rolling windows (8 attempts, 20 rest seconds), seeded from calibration, usage errors count as misses
+- [ ] **Open question (with Nathaniel):** on real hardware nobody knows when a gesture was *attempted* but missed. Proposal: outside calibration, score each signal from detected-gesture amplitude vs its calibrated amplitude, plus rest-time false triggers
 - [ ] `calibration.py`: guided prompts → POST `/calibration`; **log accuracy numbers for the pitch**
 
 **Both:** README "Technical decisions": filters, thresholds, reliability formula
