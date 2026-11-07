@@ -96,6 +96,10 @@ class EogDetector(_Excursion):
         self.polarity = -1.0 if settings[f"{p}_invert"] else 1.0
         self.confirm_us = settings[f"{p}_confirm_ms"] * 1000
         self.min_miss_us = 0  # excursions shorter than this are not reported as near-misses
+        # The pill is AC-coupled: a held look fades, so coming back to centre overshoots to the other
+        # side by the faded amount and reads as a look the other way. Ignore that for rearm_ms.
+        self.rearm_us = settings.get(f"{p}_rearm_ms", 0) * 1000
+        self.rearm_until, self.rearm_sign = 0, 0
         self.emitted = False
         self.above_since: int | None = None
 
@@ -105,7 +109,8 @@ class EogDetector(_Excursion):
             lv = self.level(xi) * self.polarity
             if not self.active:
                 self.base.update(xi)
-                if abs(lv) > self.floor and ti >= self.ready_at:
+                return_stroke = ti < self.rearm_until and int(np.sign(lv)) == -self.rearm_sign
+                if abs(lv) > self.floor and ti >= self.ready_at and not return_stroke:
                     self.active, self.sign, self.peak, self.start = True, int(np.sign(lv)), abs(lv), ti
                     self.emitted, self.above_since = False, None
                 continue
@@ -125,6 +130,8 @@ class EogDetector(_Excursion):
                     out.append(NearMiss(self.source, self.peak, int(ti // 1000)))
                 self.active = False
                 self.ready_at = ti + (self.refractory_us if self.emitted else 0)
+                if self.emitted:
+                    self.rearm_until, self.rearm_sign = ti + self.rearm_us, self.sign
             elif ti - self.start > self.max_us:  # stuck off-baseline: electrode moved; start over here
                 self.active = False
                 self.base.value = xi

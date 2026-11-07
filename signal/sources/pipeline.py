@@ -21,7 +21,7 @@ from config import SIGNAL
 from detectors import Detection, Pipeline
 from reliability import ReliabilityTracker
 
-SIGNALS = ["eog_h", "blink", "jaw"]
+SIGNALS = ["eog_h", "eog_v", "blink", "jaw"]
 POLL_S = 0.02
 
 
@@ -59,8 +59,6 @@ class PipelineSource:
     def handle(self, rows) -> list[dict]:
         out = []
         for ev in self.pipeline.process(rows):
-            if ev.source not in SIGNALS:
-                continue  # eog_v (look up/down) is plot/calibration-only until the backend maps UP/DOWN
             self.tracker.record_attempt(ev.source, isinstance(ev, Detection))
             if isinstance(ev, Detection):
                 out.append(messages.gesture(ev.source, ev.gesture, ev.confidence))

@@ -22,6 +22,18 @@ export function speak(text: string): void {
 
 let audio: AudioContext | undefined
 
+// Browsers block speech and sound until the page has had a click or key press. Eye commands arrive over
+// the WebSocket, which doesn't count, so the patient page calls this on the first click or key.
+export function unlock(): void {
+  try {
+    audio ??= new AudioContext()
+    void audio.resume()
+    if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(''))
+  } catch {
+    // Nothing to unlock.
+  }
+}
+
 function tone(): void {
   try {
     audio ??= new AudioContext()

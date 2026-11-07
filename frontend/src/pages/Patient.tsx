@@ -10,7 +10,7 @@ import { getConfig } from '../lib/api'
 import { FlickDetector } from '../lib/flickSim'
 import { attachKeyboardSim } from '../lib/keyboardSim'
 import { SPELL_ITEMS } from '../lib/spell'
-import { aid, speak } from '../lib/tts'
+import { aid, speak, unlock } from '../lib/tts'
 import type { Command, Mode, ModeChangeEvent } from '../lib/types'
 import { keyChain, view } from '../lib/wheel'
 import type { Dir } from '../lib/wheel'
@@ -139,6 +139,22 @@ export default function Patient() {
     return () => s.close()
   }, [id, run])
 
+  // Sound stays blocked until the first click or key press on this page (see tts.unlock).
+  const [soundReady, setSoundReady] = useState(() => navigator.userActivation?.hasBeenActive ?? true)
+  useEffect(() => {
+    if (soundReady) return
+    const ready = () => {
+      unlock()
+      setSoundReady(true)
+    }
+    window.addEventListener('pointerdown', ready, { once: true })
+    window.addEventListener('keydown', ready, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', ready)
+      window.removeEventListener('keydown', ready)
+    }
+  }, [soundReady])
+
   // A mode switch keeps the half-built message and restarts the scan at the first target.
   useEffect(() => {
     run({ type: 'mode' })
@@ -207,6 +223,11 @@ export default function Patient() {
           {connected ? 'online' : 'offline'}
         </span>
       </header>
+      {!soundReady && (
+        <div role="status" style={{ background: '#b45309', color: '#fff', padding: '8px 16px', textAlign: 'center' }}>
+          Sound is off. Click anywhere or press a key once to turn it on.
+        </div>
+      )}
       <ModeBanner change={modeChange} />
       {machine.phase === 'spell' ? (
         <>
@@ -231,7 +252,7 @@ export default function Patient() {
             </div>
           ) : (
             <div className="hint">
-              {machine.readback.kind === 'word' ? 'Clench to save this word' : 'Clench to speak'} · look to cancel
+              {machine.readback.kind === 'word' ? 'To save this word' : 'To speak'}: {GESTURE_LABELS[mapping.SELECT] ?? 'select'} · look to cancel
             </div>
           )}
         </div>
