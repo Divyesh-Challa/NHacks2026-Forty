@@ -18,7 +18,8 @@ The core feature. Done = demo step 2 works with the synthetic source and the deg
   - [x] hysteresis: switch back only after 20 readings ≥ 0.75
   - [x] 300 ms per-command debounce; HELP = `jaw_hold` (hold-to-confirm lives in the detector)
 - [x] `ws.py`: broadcast `mode_change`; HELP command → `alert` to caregiver
-- [ ] `db.py`: SQLModel tables + seed on startup (replace the in-memory store)
+- [x] `db.py`: SQLModel tables + seed on startup
+- [x] `/demo/degrade` accepts `"eye"` (eog_h + blink) for the one-call stage demo
 - [ ] README "Technical decisions": remap and hysteresis rules
 
 ## Role B: Signal service + hardware (owners: Nathaniel + Lawrence)
@@ -52,7 +53,8 @@ Done = demo step 1 works with the keyboard alone.
 
 ## Role D: Caregiver app + auth + prediction (owner: Fikayo)
 Done = demo step 3 works on a phone browser.
-- [ ] `backend/app/auth.py`: bcrypt-hashed caregiver in the DB, JWT required on caregiver routes + WS
+- [x] bcrypt-hashed caregiver in the DB; `/auth/login` and `/pair` check the DB (done with Role A's DB work)
+- [ ] `backend/app/auth.py`: JWT required on caregiver routes (`PUT boards`, `GET messages`) + caregiver WS (`?token=`)
 - [ ] `backend/app/predict.py`: Anthropic API, 2 s timeout, JSON phrases, fallback list
 - [ ] `Caregiver.tsx`: message history, board editor (PUT → live push to patient), reliability chart over time
 - [ ] Test HELP alert sound + Notification on a phone over the LAN (`VITE_API_URL=http://<laptop-ip>:8000`)

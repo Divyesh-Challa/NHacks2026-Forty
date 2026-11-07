@@ -130,7 +130,7 @@ class CalibrationRequest(BaseModel):
 
 
 class DegradeRequest(BaseModel):
-    signal: Source
+    signal: Literal["eog_h", "eog_v", "blink", "jaw", "brow", "eye"]  # "eye" = eog_h + blink
     factor: float
 
 

@@ -144,7 +144,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 | `POST /predict` | `{patient_id, recent_messages, time_of_day, present}` → `{phrases: [..3–5]}` |
 | `POST /calibration` | Store per-signal accuracy + false-trigger rate |
 | `GET /patients/{id}/messages` | Message + alert history |
-| `POST /demo/degrade` | Demo only: scale a signal's gain/reliability down (e.g. `{"signal": "eog_h", "factor": 0.3}`) |
+| `POST /demo/degrade` | Demo only: scale a signal's gain/reliability down (e.g. `{"signal": "eog_h", "factor": 0.3}`). `"signal": "eye"` degrades `eog_h` + `blink` together (stage demo: eye split → jaw scan in one call) |
 
 ## Component specs
 
@@ -171,7 +171,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 - Send only the last few messages. Never auto-speak.
 
 ### Auth
-- Time-box to ~2 hours. FastAPI + JWT (PyJWT) + bcrypt (passlib). Seed one caregiver (`caregiver@example.com` / documented demo password in README).
+- Time-box to ~2 hours. FastAPI + JWT (PyJWT) + `bcrypt` directly (passlib is unmaintained and breaks with bcrypt 5). Seed one caregiver (`caregiver@example.com` / documented demo password in README).
 - Patient screen has **no login**: pairs once via 6-digit code, then stores its session token. (A user who can only blink can't type a password.)
 
 ### Patient frontend
