@@ -63,6 +63,7 @@ export default function Patient() {
   const [spoken, setSpoken] = useState<string[]>([])
   const [helpActive, setHelpActive] = useState(false)
   const [connected, setConnected] = useState(false)
+  const [tickEpoch, setTickEpoch] = useState(0)
   const sock = useRef<RelaySocket | null>(null)
 
   const ctx: Ctx = useMemo(
@@ -83,10 +84,12 @@ export default function Patient() {
       const [next, effects] = step(machineRef.current, action, ctx)
       machineRef.current = next
       setMachine(next)
+      // Anything but a tick restarts the scan clock, so the first highlight after a pick gets a full interval.
+      if (action.type !== 'tick') setTickEpoch((n) => n + 1)
       let nextLinks = links
       for (const e of effects) {
         if (e.kind === 'aid') {
-          if (aidOn || e.always) aid(e.text)
+          if (aidOn || e.always) aid(e.text, e.always)
         } else if (e.kind === 'say') {
           // Confirmed sentence — the only place the real voice fires.
           speak(e.text)
@@ -146,7 +149,7 @@ export default function Patient() {
     if (!scanning) return
     const t = setInterval(() => run({ type: 'tick' }), scanMs)
     return () => clearInterval(t)
-  }, [scanning, scanMs, run])
+  }, [scanning, scanMs, run, tickEpoch])
 
   useEffect(() => writeFlag('relay_aid', aidOn), [aidOn])
   useEffect(() => writeFlag('relay_flick', flickOn), [flickOn])

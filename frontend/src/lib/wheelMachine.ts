@@ -35,6 +35,8 @@ export type Effect =
 export type Target = Dir | 'centre' | 'finish' | 'help' | 'speak' | 'cancel'
 type Result = [MachineState, Effect[]]
 
+// Read-back targets are ['speak', 'cancel']; scanning starts on Cancel so one stray SELECT can't speak.
+const READBACK_START = 1
 const LOOKS: Partial<Record<Command, Dir>> = { UP: 'up', RIGHT: 'right', DOWN: 'down', LEFT: 'left' }
 const aid = (text: string): Effect => ({ kind: 'aid', text })
 
@@ -91,7 +93,7 @@ function withCentre(path: Pick[], word: string, ctx: Ctx): Pick[] {
 function finish(s: MachineState): Result {
   const text = sentence(s.path)
   if (!text) return [s, [aid('Pick a few words first')]]
-  return [{ ...s, phase: 'readback', readback: { kind: 'sentence', text }, scanIndex: 0 }, [{ kind: 'aid', text, always: true }]]
+  return [{ ...s, phase: 'readback', readback: { kind: 'sentence', text }, scanIndex: READBACK_START }, [{ kind: 'aid', text, always: true }]]
 }
 
 function confirm(s: MachineState, ctx: Ctx): Result {
@@ -123,7 +125,7 @@ function spellCommand(s: MachineState, c: Command, ctx: Ctx): Result {
     const word = s.spelled.trim()
     if (!word) return [{ ...s, phase: 'wheel', spelled: '', scanIndex: 0 }, [announceAt(s.path, ctx)]]
     return [
-      { ...s, phase: 'readback', readback: { kind: 'word', text: word }, scanIndex: 0 },
+      { ...s, phase: 'readback', readback: { kind: 'word', text: word }, scanIndex: READBACK_START },
       [{ kind: 'aid', text: `${word}?`, always: true }],
     ]
   }

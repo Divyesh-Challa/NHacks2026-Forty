@@ -97,6 +97,14 @@ test('scan mode steps through the wheel targets', () => {
   assert.deepEqual(targets(rb, scan), ['speak', 'cancel'])
 })
 
+test('scan read-back starts on Cancel, so one stray SELECT cannot speak', () => {
+  const rb = run([cmd('UP'), cmd('RIGHT'), cmd('SELECT')]).s
+  assert.equal(targets(rb, scan)[rb.scanIndex], 'cancel')
+  const { s, effects } = run([cmd('SELECT')], scan, rb)
+  assert.equal(says(effects).length, 0)
+  assert.equal(s.phase, 'wheel')
+})
+
 test('switching mode keeps the half-built path', () => {
   const half = run([cmd('UP'), cmd('RIGHT')]).s
   const { s } = run([{ type: 'mode' }], scan, { ...half, scanIndex: 2 })
