@@ -20,6 +20,7 @@ The core feature. Done = demo step 2 works with the synthetic source and the deg
 - [x] `ws.py`: broadcast `mode_change`; HELP command → `alert` to caregiver
 - [x] `db.py`: SQLModel tables + seed on startup
 - [x] `/demo/degrade` accepts `"eye"` (eog_h + blink) for the one-call stage demo
+- [x] `/demo` presenter page: degrade/restore buttons + live reliability, mode and mapping
 - [ ] README "Technical decisions": remap and hysteresis rules
 
 ## Role B: Signal service + hardware (owners: Nathaniel + Lawrence)
