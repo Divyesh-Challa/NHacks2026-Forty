@@ -4,11 +4,13 @@ Spec and contract: [CLAUDE.md](CLAUDE.md). Tunables: `config/relay.toml`.
 **Branches:** `backend/<topic>`, `signal/<topic>`, `frontend/<topic>` → PR into `main`.
 **Contract files:** `backend/app/models.py`, `frontend/src/lib/types.ts`, `signal/messages.py`, and the CLAUDE.md contract. Change them together and post in team chat first.
 
+Tolu and Fikayo: C and D are interchangeable. Swap if you prefer.
+
 Every file that still needs work has a `SCAFFOLD STATUS` / `TODO (Role X)` header. `grep -rn "TODO (Role" .` lists them.
 
 ---
 
-## Role A: Backend core + Input manager (owner: ___)
+## Role A: Backend core + Input manager (owner: Divyesh)
 The core feature. Done = demo step 2 works with the synthetic source and the degrade toggle.
 - [ ] `backend/app/input_manager.py`, TDD against `backend/tests/test_input_manager.py` (turn each xfail into a real test)
   - [ ] reliability ranking; split if ≥2 gestures with r ≥ 0.6, else scan
@@ -20,16 +22,25 @@ The core feature. Done = demo step 2 works with the synthetic source and the deg
 - [ ] `db.py`: SQLModel tables + seed on startup (replace the in-memory store)
 - [ ] README "Technical decisions": remap and hysteresis rules
 
-## Role B: Signal service + hardware (owner: ___)
+## Role B: Signal service + hardware (owners: Nathaniel + Lawrence)
 Done = gestures from real electrodes reach the backend; calibration numbers recorded.
-- [ ] `signal/sources/synthetic.py`: real waveforms (EOG steps, blink spikes, EMG bursts, drift, 60 Hz), `degrade()`
-- [ ] `filters.py`, `detectors.py` (thresholds + refractory + confidence), `reliability.py` (rolling window), with tests on synthetic data
-- [ ] Saturday: wire the Arduino + EXG pills and verify against the Upside Down Labs docs; `arduino_serial.py`
-- [ ] Saturday: `muse_brainflow.py` (confirm the board ID for the dongle)
-- [ ] `calibration.py`: guided prompts → POST `/calibration`; **log accuracy numbers for the pitch**
-- [ ] README "Technical decisions": filters, thresholds, reliability formula
+Both of you produce the same output: dicts from `signal/messages.py`, yielded by a source's `events()`.
 
-## Role C: Patient frontend (owner: ___)
+**B1: Nathaniel: EXG pills, Arduino, EOG/EMG pipeline**
+- [ ] Wire the BioAmp EXG Pills and verify the output range and wiring against the Upside Down Labs docs
+- [ ] `arduino/relay_exg/relay_exg.ino`: confirm a steady 500 Hz (raise the baud if lines drop)
+- [ ] `signal/sources/arduino_serial.py`: parse `t_us,a0,a1,a2`
+- [ ] `filters.py` (EOG low-pass + drift, EMG bandpass + notch + RMS) and `detectors.py` (thresholds, refractory period, confidence), with tests
+
+**B2: Lawrence: Muse, synthetic data, reliability, calibration**
+- [ ] `signal/sources/synthetic.py`: real waveforms (EOG steps, blink spikes, EMG bursts, drift, 60 Hz) + `degrade()`, so B1's detectors can be tested without hardware
+- [ ] `signal/sources/muse_brainflow.py`: confirm the BrainFlow board ID for the dongle; blinks from AF7/AF8, jaw from high-frequency content
+- [ ] `reliability.py`: rolling-window `r = accuracy × (1 − false_trigger_rate)`
+- [ ] `calibration.py`: guided prompts → POST `/calibration`; **log accuracy numbers for the pitch**
+
+**Both:** README "Technical decisions": filters, thresholds, reliability formula
+
+## Role C: Patient frontend (owner: Tolu)
 Done = demo step 1 works with the keyboard alone.
 - [ ] `SplitBoard` / `ScanBoard` polish: big targets, high contrast, readable at a distance
 - [ ] `LetterBoard` (spelling via the same split/scan logic)
@@ -38,7 +49,7 @@ Done = demo step 1 works with the keyboard alone.
 - [ ] Show the current mapping (which gesture does what) from `reliability` events
 - [ ] Pairing flow: patient page uses the stored token
 
-## Role D: Caregiver app + auth + prediction (owner: ___)
+## Role D: Caregiver app + auth + prediction (owner: Fikayo)
 Done = demo step 3 works on a phone browser.
 - [ ] `backend/app/auth.py`: bcrypt-hashed caregiver in the DB, JWT required on caregiver routes + WS
 - [ ] `backend/app/predict.py`: Anthropic API, 2 s timeout, JSON phrases, fallback list
