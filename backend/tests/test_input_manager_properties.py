@@ -114,25 +114,26 @@ def test_random_sequences_keep_invariants(seed: int) -> None:
 def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
     """Random warm-up, then every reading in [0.6, 0.75): health cannot change, so neither can the mapping.
 
-    Returns True once the hover phase has been checked.
+    Returns True if the warm-up ended in scan mode, i.e. the hover phase exercised the sticky SELECT.
     """
     rng = random.Random(seed)
     im = InputManager(cfg=dict(CFG))
     for warm in gen_sequence(seed, signals, steps=60):
         step(im, warm)
     frozen = (dict(im.healthy), im.current_mapping(), im.mode)
+    in_scan = im.mode == "scan"
     for i in range(HOVER_STEPS):
         changes = step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
         assert not changes, f"hover seed={seed} step={i}: unexpected mode_change {changes}"
         assert (dict(im.healthy), im.current_mapping(), im.mode) == frozen, (
             f"hover seed={seed} step={i}: {frozen[:2]} -> {(im.healthy, im.current_mapping())}"
         )
-    return True
+    return in_scan
 
 
 def test_hover_between_cutoffs_never_flips_mapping() -> None:
-    checked = sum(run_hover(seed, RIG) for seed in SEEDS)
-    assert checked >= 400, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
+    in_scan = sum(run_hover(seed, RIG) for seed in SEEDS)  # 345 of 600 at the time of writing
+    assert in_scan >= 250, f"only {in_scan} of {len(SEEDS)} seeds hovered in scan mode"
 
 
 # --- scan-mode SELECT stays put while hovering (once known gaps, now fixed) ---
