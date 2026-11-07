@@ -138,7 +138,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 | Method + path | Purpose |
 | --- | --- |
 | `POST /auth/login` | Caregiver email + password → `{patient_id, token}`. Send `Authorization: Bearer <token>` on `PUT boards` / `GET messages`, and `?token=` on `/ws/caregiver/{id}` |
-| `POST /pair` | Patient device sends 6-digit code → patient session token |
+| `POST /pair` | Patient device sends 6-digit code → patient session token. The patient screen sends it as `?token=` on `/ws/patient/{id}` (currently not enforced by the backend) |
 | `GET /patients/{id}/boards` | Phrase boards |
 | `PUT /patients/{id}/boards` | Caregiver edits boards (broadcast update to patient WS) |
 | `POST /predict` | `{patient_id, recent_messages, time_of_day, present}` → `{phrases: [..3–5]}` |

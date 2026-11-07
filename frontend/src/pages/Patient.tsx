@@ -1,6 +1,6 @@
 // Patient screen: boards -> phrase -> TTS. Works with keyboard sim alone; backend optional.
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { LetterBoard } from '../components/LetterBoard'
 import { SPELL_DELETE, SPELL_ITEMS, SPELL_SPACE, SPELL_SPEAK } from '../lib/spell'
 import { ModeBanner } from '../components/ModeBanner'
@@ -9,6 +9,7 @@ import { ScanBoard } from '../components/ScanBoard'
 import { SplitBoard } from '../components/SplitBoard'
 import { getBoards, getConfig, predict } from '../lib/api'
 import { attachKeyboardSim } from '../lib/keyboardSim'
+import { pairedToken } from '../lib/pairing'
 import { speak } from '../lib/tts'
 import type { Board, Command, Mode, ModeChangeEvent } from '../lib/types'
 import { connect, type RelaySocket } from '../lib/ws'
@@ -49,6 +50,8 @@ export default function Patient() {
   const [spelled, setSpelled] = useState('')
   const [helpActive, setHelpActive] = useState(false)
   const [connected, setConnected] = useState(false)
+  // The stage demo runs unpaired: with no token the WS simply connects without ?token=.
+  const token = useMemo(() => pairedToken(id), [id])
   const sock = useRef<RelaySocket | null>(null)
   const seq = useRef(0)
 
@@ -89,7 +92,7 @@ export default function Patient() {
 
   useEffect(() => {
     const s = connect(
-      `/ws/patient/${id}`,
+      `/ws/patient/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       (ev) => {
         if (ev.type === 'command') dispatchRef.current(ev.command)
         else if (ev.type === 'reliability') {
@@ -104,7 +107,7 @@ export default function Patient() {
     )
     sock.current = s
     return () => s.close()
-  }, [id])
+  }, [id, token])
 
   useEffect(
     () =>
@@ -168,6 +171,8 @@ export default function Patient() {
             .join(' · ')}
           {' · '}
           {mode} · {connected ? 'online' : 'offline'}
+          {' · '}
+          {token ? 'Paired' : <>Not paired · open <Link to="/pair">/pair</Link></>}
         </span>
       </header>
       <ModeBanner change={modeChange} />
