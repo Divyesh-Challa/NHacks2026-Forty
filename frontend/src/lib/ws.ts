@@ -1,5 +1,6 @@
 // Reconnecting WebSocket client with typed messages.
 import { WS_URL } from './api'
+import { normalizeEvent } from './normalize'
 import type { PatientEvent, ServerEvent } from './types'
 
 export interface RelaySocket {
@@ -19,7 +20,7 @@ export function connect(
   const open = () => {
     ws = new WebSocket(`${WS_URL}${path}`)
     ws.onopen = () => onStatus?.(true)
-    ws.onmessage = (e) => onMessage(JSON.parse(e.data) as ServerEvent)
+    ws.onmessage = (e) => onMessage(normalizeEvent(JSON.parse(e.data)))
     ws.onclose = () => {
       onStatus?.(false)
       if (!closed) retry = setTimeout(open, 1500)

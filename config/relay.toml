@@ -14,6 +14,8 @@ help_repeat_window_ms = 3000
 
 [ui]
 scan_interval_ms = 1500
+flick_px = 160               # mouse-flick sim: cursor this far from screen centre = one look
+flick_rearm_px = 50          # ...and must come back this close before the next look
 
 [signal]
 sample_rate_hz = 500

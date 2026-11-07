@@ -38,6 +38,7 @@ gate backend-tests  bash -c "cd backend && '$BACKEND_VENV/bin/pytest' -q"
 gate signal-tests   bash -c "cd signal && '$SIGNAL_VENV/bin/pytest' -q"
 gate frontend-build bash -c "cd frontend && npm run -s build"
 gate frontend-lint  bash -c "cd frontend && npm run -s lint"
+gate frontend-tests bash -c "cd frontend && npm test -s"
 [[ "${1:-}" == quick ]] || gate demo-check "$BACKEND_VENV/bin/python" scripts/demo_check.py
 
 rm -f "$LOG" "$LOG".*

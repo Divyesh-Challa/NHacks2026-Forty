@@ -13,7 +13,7 @@ signal/   filters → gesture detectors → per-signal reliability
    │ gesture + reliability events   (WS /ws/signal)
 backend/  input manager (gestures → LEFT/RIGHT/SELECT/BACK/HELP, split/scan, remap) · prediction · auth · SQLite
    │ command / reliability / mode_change / alert / spoken   (WS /ws/patient/{id}, /ws/caregiver/{id})
-frontend/ /patient/:id (split + scan boards, TTS) · /caregiver (alerts, history, editor, chart)
+frontend/ /patient/:id (radial wheel + scan, read-back, TTS) · /caregiver (alerts, history, editor, chart)
 ```
 
 The full interface contract is in [CLAUDE.md](CLAUDE.md). All tunables live in [`config/relay.toml`](config/relay.toml).
@@ -34,7 +34,7 @@ make demo-check         # plays the 3 stage-demo steps end to end; run before th
 
 **Synthetic signals:** `make signal` streams scripted gestures. With `--script none`, it waits for you to type `l`/`r`/`b`/`j`/`h` + Enter in its terminal. Add `--detectors real` to run synthetic *waveforms* through the real filters and detectors, the same code path as the Arduino. `cd signal && .venv/bin/python -m tools.plot_live` shows the raw channels live; add `--filtered` to see what the detectors see (filtered level, threshold, near-miss floor, live detections). Press `d` to degrade the eyes. `python -m tools.record` records labelled CSVs.
 
-**Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: ←/→ = LEFT/RIGHT, Space = SELECT, Backspace = BACK, hold H for 2 s = HELP, M = toggle split/scan. The patient page also works with the backend offline.
+**Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: arrows = look up/down/left/right (pick a wheel slot), Space = SELECT (finish, then confirm to speak), B = ACCEPT the centre suggestion, Backspace = BACK, hold H for 2 s = HELP, M = toggle wheel/scan, F = mouse-flick simulator (flick the cursor away from screen centre), A = audio aid on/off. Example: ↑ → ↑ → Space Space says "I want water." The patient page also works with the backend offline.
 
 **With hardware:** flash `arduino/relay_exg/relay_exg.ino` and find the port with `ls /dev/tty.usb*`. Then:
 

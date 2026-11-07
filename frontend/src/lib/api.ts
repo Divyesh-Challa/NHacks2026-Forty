@@ -18,7 +18,10 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getBoards = (patientId: string) => json<Board[]>(`/patients/${patientId}/boards`)
 export const getConfig = () =>
-  json<{ ui: { scan_interval_ms: number }; input: { reliability_cutoff: number } }>('/config')
+  json<{
+    ui: { scan_interval_ms: number; flick_px?: number; flick_rearm_px?: number }
+    input: { reliability_cutoff: number }
+  }>('/config')
 export const login = (email: string, password: string) =>
   json<{ patient_id: string; token: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
 export const pair = (code: string) =>

@@ -9,7 +9,7 @@ import './demo.css'
 
 const PATIENT_ID = 'p1'
 const SIGNALS = ['eog_h', 'blink', 'jaw'] as const
-const COMMANDS = ['LEFT', 'RIGHT', 'SELECT', 'BACK', 'HELP'] as const
+const COMMANDS = ['LEFT', 'RIGHT', 'UP', 'DOWN', 'SELECT', 'ACCEPT', 'BACK', 'HELP'] as const
 const LABELS: Record<string, string> = { eog_h: 'Eye movement', eog_v: 'Eye up/down', blink: 'Blink', jaw: 'Jaw', brow: 'Eyebrow' }
 const GESTURES: Record<string, string> = {
   look_left: 'Look left',
@@ -127,8 +127,8 @@ export default function Demo() {
             {rel ? (
               <>
                 <p className="mode-figure">
-                  {rel.mode === 'split' ? 'Split mode' : 'Scan mode'}
-                  <span>{rel.mode === 'split' ? 'two gestures narrow the board' : 'one gesture selects the highlight'}</span>
+                  {rel.mode === 'wheel' ? 'Wheel mode' : 'Scan mode'}
+                  <span>{rel.mode === 'wheel' ? 'four eye directions pick a slot' : 'one gesture selects the highlight'}</span>
                 </p>
                 <table className="mapping">
                   <thead>
@@ -213,7 +213,7 @@ export default function Demo() {
               <button className="quiet" disabled={busy} onClick={() => run('All signals restored', [['eye', 1], ['jaw', 1]])}>
                 Restore all
               </button>
-              <span>Back to split after {rules.recover_window} readings above {pct(rules.recover_cutoff)}.</span>
+              <span>Back to wheel after {rules.recover_window} readings above {pct(rules.recover_cutoff)}.</span>
             </div>
             {last && (
               <p className={`con-result ${last.ok ? '' : 'neg'}`} role="status">

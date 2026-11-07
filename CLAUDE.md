@@ -47,7 +47,7 @@ Backend (FastAPI)
         │ commands / reliability / mode_change / alert over WebSocket
         ▼
 Frontend (React)
-   ├─ /patient/:id    — split board, scan board, letter board, TTS, prediction strip
+   ├─ /patient/:id    — radial wheel (wheel + scan), spelling, read-back, TTS, audio aid
    └─ /caregiver      — login, live alerts, message history, phrase editor, reliability chart
 ```
 
@@ -81,8 +81,9 @@ relay/
   frontend/                             # Vite + React + TypeScript
     src/pages/Patient.tsx
     src/pages/Caregiver.tsx
-    src/components/SplitBoard.tsx
-    src/components/ScanBoard.tsx
+    src/components/RadialWheel.tsx
+    src/lib/wheel.ts                   # tree, navigation, sentences (tested)
+    src/lib/wheelMachine.ts            # read-back, spelling, scan (tested)
     src/components/LetterBoard.tsx
     src/components/PredictionStrip.tsx
     src/components/ModeBanner.tsx
@@ -93,19 +94,20 @@ relay/
 
 ## Interface contract (do not change without updating this file)
 
-The UI never sees raw signals. It only receives **five commands**:
+The UI never sees raw signals. It only receives **eight commands** (radial wheel design: `docs/superpowers/specs/2026-11-07-radial-wheel-design.md`):
 
 | Command | Meaning |
 | --- | --- |
-| `LEFT` | Choose left half / move highlight back |
-| `RIGHT` | Choose right half / move highlight forward |
-| `SELECT` | Confirm highlighted item |
+| `UP` / `DOWN` / `LEFT` / `RIGHT` | Pick the wheel slot in that direction (looking at the kept slot again goes back) |
+| `SELECT` | Finish: read the sentence back; a second `SELECT` speaks it. In scan mode: pick the highlight |
+| `ACCEPT` | Accept the centre suggestion (a learned word) |
 | `BACK` | Undo / go up a level |
 | `HELP` | Urgent alert to caregiver (requires hold-to-confirm: gesture held ~2 s, or repeated 3×) |
 
 **Two UI modes:**
-- **Split mode** (2+ reliable gestures): board splits into left/right halves; `LEFT`/`RIGHT` narrows until one item remains, then it's selected (Look-to-Speak style). `BACK` optional.
-- **Scan mode** (1 reliable gesture): highlight auto-advances (default 1.5 s, configurable); the single gesture = `SELECT`. `BACK` and `HELP` are items in the scan list.
+- **Wheel mode** (eye movement reliable in all four directions): four fixed slots (up/right/down/left) plus a centre suggestion. The person learns positions by heart, so it works with eyes closed; an audio aid reads options aloud. The picked slot stays put and the other three change to what follows from it.
+- **Scan mode** (eye movement unreliable): the same wheel, with a highlight stepping through the slots, centre, Finish and HELP (default 1.5 s, configurable); the single best gesture = `SELECT`.
+- **Transition note:** until the backend follow-up lands, the backend still sends mode `split` and only `LEFT/RIGHT/SELECT/BACK/HELP`; the frontend reads `split` as `wheel` (`frontend/src/lib/normalize.ts`).
 
 **Signal service → backend** (`/ws/signal`):
 ```json
@@ -126,7 +128,7 @@ Gestures: `look_left`, `look_right`, `look_up`, `look_down`, `blink_double`, `ja
 
 **Patient screen → backend** (`/ws/patient/{id}`):
 ```json
-{"type": "spoken", "text": "I need water", "ts": 1762490000000}
+{"type": "spoken", "text": "I want water.", "path": ["Food", "I want", "Drinks", "Water"], "ts": 1762490000000}
 {"type": "alert", "message": "HELP", "ts": 1762490000000}
 {"type": "set_mode", "mode": "scan"}
 ```
@@ -175,10 +177,12 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 - Patient screen has **no login**: pairs once via 6-digit code, then stores its session token. (A user who can only blink can't type a password.)
 
 ### Patient frontend
-- Very large targets, high contrast, readable at a distance. No time pressure in split mode.
-- Default boards (seed): Needs (water, food, bathroom, reposition me, too hot/cold, pain), People (call family, nurse), Feelings, Yes/No, Letters.
-- TTS via the browser Web Speech API.
-- Keyboard simulator in `keyboardSim.ts`: ←/→ = LEFT/RIGHT, Space = SELECT, Backspace = BACK, H (hold) = HELP, plus a key to toggle split/scan for testing. Must work with no hardware.
+- Very large targets, high contrast, readable at a distance. No time pressure in wheel mode.
+- Radial wheel (seed tree in `frontend/src/lib/wheelTree.ts`): Food (I want / I don't want / I need → Drinks, Meals, Snacks → items), Needs (Body, People, Bathroom), Feelings, and Yes / No permanently on the left. Sentences come from starter templates, so "not" can't be lost; every sentence is read back and confirmed before it is spoken.
+- Spell… slot adds a missing word once; it's then suggested in the centre for that path (`lib/words.ts`, browser storage until the backend words API exists).
+- Phrase predictions are paused on the patient screen (backend `/predict` still works) until the setup flow is decided.
+- TTS via the browser Web Speech API: the real voice only for confirmed sentences; a quieter, faster audio aid (with a tone) for read-outs and read-back.
+- Keyboard simulator in `keyboardSim.ts`: arrows = UP/DOWN/LEFT/RIGHT, B = ACCEPT, Space = SELECT, Backspace = BACK, H (hold) = HELP, M = toggle wheel/scan, F = mouse-flick simulator, A = audio aid. Must work with no hardware.
 - Mode banner on `mode_change`: e.g. "Eye movement is getting harder to read. Switching to jaw clench."
 
 ### Caregiver frontend

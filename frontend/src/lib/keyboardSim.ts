@@ -1,39 +1,36 @@
 // Keyboard simulator — drives the UI with no hardware and no backend.
-//   ←/→ = LEFT/RIGHT, Space = SELECT, Backspace = BACK, hold H (2 s) = HELP, M = toggle split/scan
+//   ←/→/↑/↓ = LEFT/RIGHT/UP/DOWN (the four looks), B = ACCEPT (double blink), Space = SELECT (jaw clench),
+//   Backspace = BACK, hold H (2 s) = HELP, M = toggle wheel/scan, F = mouse-flick sim, A = audio aid
 import type { Command } from './types'
 
 const HELP_HOLD_MS = 2000
 
-export function attachKeyboardSim(onCommand: (c: Command) => void, onToggleMode: () => void): () => void {
+const KEYS: Record<string, Command> = {
+  ArrowLeft: 'LEFT',
+  ArrowRight: 'RIGHT',
+  ArrowUp: 'UP',
+  ArrowDown: 'DOWN',
+  b: 'ACCEPT',
+  ' ': 'SELECT',
+  Backspace: 'BACK',
+}
+
+export function attachKeyboardSim(
+  onCommand: (c: Command) => void,
+  toggles: { mode(): void; flick(): void; aid(): void },
+): () => void {
   let helpTimer: ReturnType<typeof setTimeout> | undefined
 
   const down = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
     if (e.repeat) return
-    switch (e.key) {
-      case 'ArrowLeft':
-        onCommand('LEFT')
-        break
-      case 'ArrowRight':
-        onCommand('RIGHT')
-        break
-      case ' ':
-        onCommand('SELECT')
-        break
-      case 'Backspace':
-        onCommand('BACK')
-        break
-      case 'h':
-      case 'H':
-        helpTimer = setTimeout(() => onCommand('HELP'), HELP_HOLD_MS)
-        break
-      case 'm':
-      case 'M':
-        onToggleMode()
-        break
-      default:
-        return
-    }
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
+    if (KEYS[key]) onCommand(KEYS[key])
+    else if (key === 'h') helpTimer = setTimeout(() => onCommand('HELP'), HELP_HOLD_MS)
+    else if (key === 'm') toggles.mode()
+    else if (key === 'f') toggles.flick()
+    else if (key === 'a') toggles.aid()
+    else return
     e.preventDefault()
   }
   const up = (e: KeyboardEvent) => {

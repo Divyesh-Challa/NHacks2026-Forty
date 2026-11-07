@@ -1,8 +1,8 @@
 // Wire-format types — the interface contract from CLAUDE.md.
 // Mirrors backend/app/models.py by hand. Change both (and CLAUDE.md) together and tell the team.
 
-export type Command = 'LEFT' | 'RIGHT' | 'SELECT' | 'BACK' | 'HELP'
-export type Mode = 'split' | 'scan'
+export type Command = 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SELECT' | 'ACCEPT' | 'BACK' | 'HELP'
+export type Mode = 'wheel' | 'scan'
 
 export interface CommandEvent {
   type: 'command'
@@ -56,9 +56,10 @@ export type ServerEvent =
 
 // Patient screen -> backend
 export type PatientEvent =
-  | { type: 'spoken'; text: string; ts: number }
+  | { type: 'spoken'; text: string; path?: string[]; ts: number }
   | { type: 'alert'; message: string; ts: number }
-  | { type: 'set_mode'; mode: Mode }
+  // The backend still calls wheel mode "split" until the backend follow-up lands.
+  | { type: 'set_mode'; mode: 'split' | 'scan' }
 
 export interface Board {
   id: string
