@@ -9,7 +9,11 @@ How it decides:
   - healthy -> unhealthy: last `remap_window` readings all below `reliability_cutoff`.
   - unhealthy -> healthy: last `recover_window` readings all >= `recover_cutoff` (hysteresis).
   - Split mode if a preferred LEFT/RIGHT pair is healthy (first match in SPLIT_PAIRS),
-    else scan mode with the most reliable healthy gesture as SELECT.
+    else scan mode with one SELECT gesture from SCAN_SELECT.
+  - Scan SELECT is sticky: the current SELECT (including split mode's jaw_clench extra) is kept
+    while it is healthy, or while no candidate is. It is re-picked (most reliable healthy
+    candidate) only when its signal turns unhealthy and another candidate is healthy, or when
+    there is no current SELECT. So it changes only on a health change, never on live values.
   - A mode_change is emitted when the mode or a primary control (LEFT/RIGHT/SELECT) changes.
   - HELP = jaw_hold, which the detector only emits after a sustained (~help_hold_ms) clench,
     so a short clench can never raise HELP. In scan mode HELP is also a scan item.
@@ -182,8 +186,14 @@ class InputManager:
         if mode == "split":  # forced split with no healthy pair: fall back to eye movement
             return "split", {"LEFT": "look_left", "RIGHT": "look_right"}
 
-        candidates = [g for g in SCAN_SELECT if self._ok(g)] or SCAN_SELECT
-        select = max(candidates, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
+        # Sticky SELECT: keep the current one (a split-mode SELECT carries over) while it is healthy,
+        # or while nothing is. Health has hysteresis, so live values between the cutoffs never flip it.
+        healthy = [g for g in SCAN_SELECT if self._ok(g)]
+        current = self.mapping.get("SELECT")
+        if current in SCAN_SELECT and (self._ok(current) or not healthy):
+            select = current
+        else:
+            select = max(healthy or SCAN_SELECT, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
         mapping = {"SELECT": select}
         if self._ok(HELP_GESTURE):
             mapping["HELP"] = HELP_GESTURE

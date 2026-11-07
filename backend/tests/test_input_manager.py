@@ -117,6 +117,27 @@ def test_losing_both_eye_channels_switches_to_scan_with_jaw() -> None:
     assert "jaw clench" in changes[-1].reason
 
 
+def test_scan_keeps_select_while_nothing_is_healthy() -> None:
+    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
+    feed(im, 10, eog_h=0.3, blink=0.3, jaw=0.3)
+    assert im.mode == "scan"
+    select = im.current_mapping()["SELECT"]
+
+    # Hovering between the cutoffs changes no signal's health, so SELECT must not move either.
+    changes = feed(im, 1, eog_h=0.74, blink=0.6, jaw=0.6) + feed(im, 1, eog_h=0.6, blink=0.74, jaw=0.6)
+    assert changes == []
+    assert im.current_mapping()["SELECT"] == select
+
+
+def test_scan_repicks_select_when_its_signal_becomes_unhealthy() -> None:
+    im = make(eog_h=0.3, blink=0.3, jaw=0.9)
+    assert im.current_mapping()["SELECT"] == "jaw_clench"
+    feed(im, 9, jaw=0.3)
+    changes = feed(im, 1, jaw=0.3, brow=0.9)
+    assert im.mode == "scan" and im.current_mapping()["SELECT"] == "brow_raise"
+    assert len(changes) == 1 and "Jaw clench" in changes[0].reason
+
+
 def test_unmapped_signal_decline_does_not_announce() -> None:
     im = make(eog_h=0.9, blink=0.9, jaw=0.9)  # look mapping; blink only used for BACK
     assert feed(im, 10, eog_h=0.9, blink=0.3, jaw=0.9) == []
