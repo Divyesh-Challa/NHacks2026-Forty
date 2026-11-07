@@ -36,6 +36,10 @@ make demo-check         # plays the 3 stage-demo steps end to end; run before th
 
 **With hardware:** flash `arduino/relay_exg/relay_exg.ino`, then `cd signal && .venv/bin/python run.py --source arduino --port /dev/tty.usbmodemXXXX`. *(TODO: Role B)*
 
+**Caregiver phone (demo step 3):** put the phone on the same Wi-Fi as the laptop and run `make frontend-https`. Open the **Network** URL it prints, e.g. `https://192.168.x.x:5173/caregiver`, accept the self-signed certificate warning once, then log in. The login tap unlocks the alert sound; tap "enable notifications" if it's offered. HELP then sounds, vibrates (Android) and shows a notification.
+- Plain `make frontend` also works on the phone, since every request goes through the dev server's `/api` proxy, but phone browsers block notifications without HTTPS. You still get the sound, vibration and the red banner.
+- iPhone Safari only shows web notifications for sites added to the Home Screen. Rely on the sound and banner there.
+
 **Demo controls:** open `http://localhost:5173/demo` on a second laptop or phone (not the projector). It has buttons for "Degrade eyes → jaw scan", "Degrade eye movement only" and "Restore all", plus live reliability bars, the current mode and mapping, and recent switches.
 
 **Demo degrade from the terminal (stage step 2):** this degrades both eye signals, so Relay switches from eye-movement split mode to jaw-clench scan mode after about 10 s:

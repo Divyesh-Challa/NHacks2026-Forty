@@ -58,7 +58,7 @@ Done = demo step 3 works on a phone browser.
 - [x] `backend/app/auth.py`: JWT required on caregiver routes (`PUT boards`, `GET messages`) + caregiver WS (`?token=`), scoped to the caregiver's patient
 - [x] `backend/app/predict.py`: Anthropic API, 2 s timeout, JSON phrases, fallback list (needs `ANTHROPIC_API_KEY` in `.env` to use the model)
 - [x] `Caregiver.tsx`: Live / History / Boards / Signals tabs; HELP banner + 3-tone sound + Notification; board editor (PUT → live push); reliability chart with the 60% line
-- [ ] Test HELP alert sound + Notification on a phone over the LAN (`VITE_API_URL=http://<laptop-ip>:8000`)
+- [ ] Test HELP alert sound + Notification on a real phone: `make frontend-https`, open the Network URL on the phone (see README "Caregiver phone")
 
 ---
 
