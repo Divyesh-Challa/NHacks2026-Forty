@@ -170,12 +170,12 @@ The arrow keys and Space only change the patient screen. They never reach the si
    lrlrlrbbbbbb
    ```
 
-3. Wait about 15 s. If the scan banner has not appeared, type the same line again. Repeat up to three times. Rehearse this once before the show, because the exact count depends on the timing.
+3. Wait about 15 s. In a live test one line was enough: a single banner, "…Switching to scan mode with jaw clench to select.", about 10 s after the line. If it has not appeared after 15 s, type the line again (up to three times).
 4. Expect about 25% of the typed attempts to be detected. Those move the patient screen as normal commands, so the board will move while you type. That is expected.
 
 *Reset with the keyboard:*
 1. Press **Restore all** on `/demo`.
-2. In terminal 3, type `lrlrlrbbbbbb` and press Enter. Repeat until split returns, up to three times. The accuracy window needs fresh good attempts to refill.
+2. In terminal 3, type `lrlrlrbbbbbb` and press Enter, about every 15 s, until eye-movement split returns. The accuracy window needs fresh good attempts to refill. In a live test it took three lines and about 35 s, passing through "…Switching back to double blink and jaw clench" before "…Switching back to eye movement."
 
 *Expect stray commands.* Even with `--script none`, the simulated detector produces about one false trigger every 30 s while the signal is at rest. In scan mode a stray jaw clench is a SELECT and can speak a phrase. Keep going if it happens. Do not explain it away in front of the audience. Press BACK if it matters.
 
@@ -250,5 +250,5 @@ What was run, and what was only checked against the Makefile.
 - `make plot`, `make calibrate`, `make signal-hw`: hardware targets. Not run.
 - `make frontend`, `make frontend-https`, `make backend`: `make -n` only. Starting them here was not confirmed, so the exact `Network:` line format is from `frontend/vite.config.ts`, not from output.
 - `make signal`: `make -n` only. The scripted loop is from `signal/sources/synthetic.py` (`DEFAULT_SCRIPT`).
-- The keyboard-fallback typing counts (`lrlrlrbbbbbb`, up to three repeats) are from code reading, not a live run. Rehearse once.
+- The keyboard fallback was run live (throwaway backend, `run.py --source synthetic --script none` on a real terminal, `/demo/degrade` eye 0.3): one `lrlrlrbbbbbb` line → one split→scan banner about 10 s later; after Restore all, three lines over about 35 s → back to eye-movement split. Typed keys only work in a real terminal (`run.py` reads them only when stdin is a TTY), not piped input.
 - The pairing "Paired" header: not on `main` yet. Written as the intended procedure.
