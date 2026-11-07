@@ -1,9 +1,10 @@
-// REST helpers + backend URLs. Override with VITE_API_URL for phone testing on the LAN.
+// REST helpers + backend URLs. By default everything goes through the Vite dev server's /api proxy
+// (see vite.config.ts), so the same build works on the laptop and on a phone on the same Wi-Fi.
 import type { AlertEvent, Board, SpokenEvent } from './types'
 
 export type HistoryItem = AlertEvent | SpokenEvent
 
-export const API_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+export const API_URL: string = import.meta.env.VITE_API_URL ?? `${window.location.origin}/api`
 export const WS_URL = API_URL.replace(/^http/, 'ws')
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {

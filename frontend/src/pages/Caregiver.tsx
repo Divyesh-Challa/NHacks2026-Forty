@@ -1,6 +1,7 @@
 // Caregiver screen (mobile-friendly): login, live alerts, history, phrase editor, reliability chart.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BoardEditor } from '../components/BoardEditor'
+import { alertsUnlocked, playHelpAlert, unlockAlerts } from '../lib/alertSound'
 import { ReliabilityChart, type ReliabilityPoint } from '../components/ReliabilityChart'
 import { getBoards, getConfig, getMessages, login, putBoards, Unauthorized, type HistoryItem } from '../lib/api'
 import type { Board, ModeChangeEvent, ServerEvent } from '../lib/types'
@@ -10,16 +11,6 @@ type Tab = 'alerts' | 'history' | 'boards' | 'signals'
 type FeedItem = HistoryItem | ModeChangeEvent
 const MAX_POINTS = 180 // ~3 min at one reliability reading per second
 
-function beep() {
-  const ctx = new AudioContext()
-  for (const [i, f] of [880, 660, 880].entries()) {
-    const osc = ctx.createOscillator()
-    osc.frequency.value = f
-    osc.connect(ctx.destination)
-    osc.start(ctx.currentTime + i * 0.25)
-    osc.stop(ctx.currentTime + i * 0.25 + 0.2)
-  }
-}
 
 function describe(ev: FeedItem): string {
   if (ev.type === 'alert') return `⚠ ${ev.message}`
@@ -37,6 +28,7 @@ function Login({ onLogin }: { onLogin: (token: string, patientId: string) => voi
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          unlockAlerts() // this tap is what lets the phone play the HELP sound later
           login(email, password)
             .then((r) => onLogin(r.token, r.patient_id))
             .catch(() => setError('Login failed'))
@@ -69,6 +61,16 @@ export default function Caregiver() {
   const [cutoff, setCutoff] = useState(0.6)
   const [connected, setConnected] = useState(false)
   const [urgent, setUrgent] = useState(false)
+  const [soundOn, setSoundOn] = useState(alertsUnlocked)
+  const [notifyState, setNotifyState] = useState(() =>
+    !window.isSecureContext || !('Notification' in window) ? 'unavailable' : Notification.permission,
+  )
+
+  const enableAlerts = () => {
+    unlockAlerts()
+    setSoundOn(true)
+    if (notifyState === 'default') Notification.requestPermission().then(setNotifyState)
+  }
   const tabRef = useRef(tab)
   tabRef.current = tab
 
@@ -92,14 +94,13 @@ export default function Caregiver() {
 
   useEffect(() => {
     if (!token) return
-    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
     const s = connect(
       `/ws/caregiver/${patientId}?token=${encodeURIComponent(token)}`,
       (ev: ServerEvent) => {
         if (ev.type === 'alert') {
-          beep()
+          playHelpAlert()
           setUrgent(true)
-          if ('Notification' in window && Notification.permission === 'granted')
+          if (window.isSecureContext && 'Notification' in window && Notification.permission === 'granted')
             new Notification('Relay: HELP requested', { body: 'Your patient needs help now.', requireInteraction: true })
         }
         if (ev.type === 'alert' || ev.type === 'spoken') setHistory((h) => [ev, ...h])
@@ -120,6 +121,7 @@ export default function Caregiver() {
         onLogin={(t, pid) => {
           localStorage.setItem('relay_token', t)
           localStorage.setItem('relay_patient', pid)
+          setSoundOn(true) // the login tap unlocked audio
           setPatientId(pid)
           setToken(t)
         }}
@@ -136,6 +138,18 @@ export default function Caregiver() {
         <span className="muted">{connected ? 'Connected' : 'Reconnecting…'}</span>
         <button className="link" onClick={logout}>Log out</button>
       </header>
+
+      {(!soundOn || notifyState === 'default') && (
+        <button className="enable-alerts" onClick={enableAlerts}>
+          🔔 Tap to enable HELP alert sound{notifyState === 'default' ? ' and notifications' : ''}
+        </button>
+      )}
+      {notifyState === 'unavailable' && (
+        <p className="muted small">
+          Phone notifications need HTTPS. Start the frontend with <code>make frontend-https</code>. Sound and
+          vibration still work.
+        </p>
+      )}
 
       {urgent && (
         <button className="urgent-banner" onClick={() => setUrgent(false)}>
