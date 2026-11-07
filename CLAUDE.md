@@ -33,7 +33,7 @@ Everything you build should serve this sequence working reliably on stage.
 ## Architecture
 
 ```
-Sources (EXG pills via Arduino, Muse 2 via BrainFlow, keyboard simulator)
+Sources (EXG pills via Arduino, synthetic generator, keyboard simulator)
         │ raw samples
         ▼
 Signal service (Python process)  — filters, gesture detectors, per-signal reliability
@@ -62,7 +62,6 @@ relay/
   signal/                               # signal service (Python)
     run.py                              # entry: pick source, stream gestures to backend
     sources/arduino_serial.py
-    sources/muse_brainflow.py
     sources/synthetic.py                # fake EOG/blink/jaw generator (use tonight)
     filters.py
     detectors.py
@@ -152,7 +151,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 ### Signal service
 - **Synthetic source (build first):** generates realistic-ish waveforms at 250–500 Hz: EOG horizontal steps (look left/right), vertical blink spikes, jaw EMG bursts (broadband high-frequency), plus baseline drift and 60 Hz noise. Expose a way to script gestures (e.g. keyboard or a timed sequence) and a `degrade(signal, factor)` knob.
 - **Arduino source:** `arduino/relay_exg.ino` samples A0–A2 at a fixed rate (target 500 Hz) and prints `t_us,a0,a1,a2` at 115200 baud. Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG. Verify BioAmp EXG Pill output range and wiring against Upside Down Labs docs once hardware is in hand.
-- **Muse source:** BrainFlow (Muse 2 board via the kit's USB BLE dongle — confirm the correct BrainFlow board ID for the dongle). Use frontal channels (AF7/AF8) for blinks and temporal/high-frequency content for jaw clench.
+- **Hardware we have:** one Arduino + the BioAmp EXG Pill kit. **No Muse.** Every real signal comes through the EXG pills.
 - **Filters:** EOG: low-pass ~10 Hz plus drift handling (use slope/derivative or high-pass ~0.1 Hz rather than absolute level). EMG: bandpass ~20–150 Hz (limited by sample rate), 60 Hz notch, RMS envelope.
 - **Detectors:** threshold-based with refractory periods. Output `confidence` from how far past threshold the feature is.
 - **Calibration:** guided prompts ("look left" ×10, "rest" 20 s, "clench" ×10…). Compute per-signal accuracy and false-trigger rate at rest. Thresholds adapt per user from calibration.
@@ -195,7 +194,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 5. Signal service: synthetic source, filters, detectors, reliability, tested on synthetic data; streams to backend.
 6. Caregiver page with live HELP alerts. Auth (time-boxed).
 
-**Saturday (hardware):** Arduino sketch + serial source, Muse source, calibration flow, live reliability, demo degrade toggle, prediction, board editor, reliability chart. Full end-to-end run; record backup demo video.
+**Saturday (hardware):** Arduino sketch + serial source, calibration flow, live reliability, demo degrade toggle, prediction, board editor, reliability chart. Full end-to-end run; record backup demo video.
 
 **Priority if time runs short:** input manager + live switch > split/scan boards > HELP alerts > prediction > auth > board editor > reliability chart.
 

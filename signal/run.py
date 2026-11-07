@@ -2,7 +2,6 @@
 
   python run.py --source synthetic
   python run.py --source arduino --port /dev/tty.usbmodem1101
-  python run.py --source muse
 """
 
 import argparse
@@ -22,13 +21,9 @@ def make_source(args: argparse.Namespace):
         from sources.synthetic import SyntheticSource
 
         return SyntheticSource(interval_s=args.interval)
-    if args.source == "arduino":
-        from sources.arduino_serial import ArduinoSource
+    from sources.arduino_serial import ArduinoSource
 
-        return ArduinoSource(args.port)
-    from sources.muse_brainflow import MuseSource
-
-    return MuseSource(args.port)
+    return ArduinoSource(args.port)
 
 
 async def listen_controls(ws, source) -> None:
@@ -61,7 +56,7 @@ async def main(args: argparse.Namespace) -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     p = argparse.ArgumentParser()
-    p.add_argument("--source", choices=["synthetic", "arduino", "muse"], default="synthetic")
+    p.add_argument("--source", choices=["synthetic", "arduino"], default="synthetic")
     p.add_argument("--port", default=None)
     p.add_argument("--patient", default="p1")
     p.add_argument("--url", default=BACKEND_WS_URL)
