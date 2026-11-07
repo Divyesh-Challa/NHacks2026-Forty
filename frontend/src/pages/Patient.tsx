@@ -1,12 +1,12 @@
 // Patient screen: boards -> phrase -> TTS. Works with keyboard sim alone; backend optional.
-// Owner: Role C.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { LetterBoard, SPELL_DELETE, SPELL_ITEMS, SPELL_SPACE, SPELL_SPEAK } from '../components/LetterBoard'
 import { ModeBanner } from '../components/ModeBanner'
 import { PredictionStrip } from '../components/PredictionStrip'
 import { ScanBoard } from '../components/ScanBoard'
 import { SplitBoard } from '../components/SplitBoard'
-import { getBoards, getConfig } from '../lib/api'
+import { getBoards, getConfig, predict } from '../lib/api'
 import { attachKeyboardSim } from '../lib/keyboardSim'
 import { speak } from '../lib/tts'
 import type { Board, Command, Mode, ModeChangeEvent } from '../lib/types'
@@ -17,18 +17,33 @@ const OFFLINE_BOARDS: Board[] = [
   { id: 'needs', title: 'Needs', items: ['I need water', "I'm hungry", 'Bathroom', 'Reposition me', "I'm in pain"] },
   { id: 'yesno', title: 'Yes / No', items: ['Yes', 'No'] },
 ]
+const SPELL_BOARD: Board = { id: '__spell', title: 'Spell', items: SPELL_ITEMS }
 const SCAN_BACK = '← Back'
 const SCAN_HELP = '⚠ HELP'
+const PREDICTION_MARK = '★ '
+
+const GESTURE_LABELS: Record<string, string> = {
+  look_left: 'look left',
+  look_right: 'look right',
+  blink_double: 'double blink',
+  jaw_clench: 'clench jaw',
+  jaw_hold: 'hold jaw 2 s',
+  brow_raise: 'raise eyebrows',
+}
 
 export default function Patient() {
   const { id = 'p1' } = useParams()
   const [boards, setBoards] = useState<Board[]>(OFFLINE_BOARDS)
   const [boardId, setBoardId] = useState<string | null>(null)
   const [mode, setMode] = useState<Mode>('split')
+  const [mapping, setMapping] = useState<Record<string, string>>({})
   const [scanMs, setScanMs] = useState(1500)
   const [command, setCommand] = useState<{ command: Command; id: number } | null>(null)
   const [modeChange, setModeChange] = useState<ModeChangeEvent | null>(null)
   const [spoken, setSpoken] = useState<string[]>([])
+  const [predictions, setPredictions] = useState<string[]>([])
+  const [predicting, setPredicting] = useState(false)
+  const [spelled, setSpelled] = useState('')
   const [helpActive, setHelpActive] = useState(false)
   const [connected, setConnected] = useState(false)
   const sock = useRef<RelaySocket | null>(null)
@@ -57,13 +72,28 @@ export default function Patient() {
     getConfig().then((c) => setScanMs(c.ui.scan_interval_ms)).catch(() => {})
   }, [id])
 
+  // Refresh suggestions after every spoken message (and on load).
+  useEffect(() => {
+    let cancelled = false
+    setPredicting(true)
+    predict(id, [...spoken].reverse())
+      .then((r) => !cancelled && setPredictions(r.phrases))
+      .catch(() => !cancelled && setPredictions([]))
+      .finally(() => !cancelled && setPredicting(false))
+    return () => {
+      cancelled = true
+    }
+  }, [id, spoken])
+
   useEffect(() => {
     const s = connect(
       `/ws/patient/${id}`,
       (ev) => {
         if (ev.type === 'command') dispatchRef.current(ev.command)
-        else if (ev.type === 'reliability') setMode(ev.mode)
-        else if (ev.type === 'mode_change') {
+        else if (ev.type === 'reliability') {
+          setMode(ev.mode)
+          setMapping(ev.mapping as Record<string, string>)
+        } else if (ev.type === 'mode_change') {
           setMode(ev.to)
           setModeChange(ev)
         } else if (ev.type === 'boards_updated') setBoards(ev.boards)
@@ -80,39 +110,69 @@ export default function Patient() {
         const next = mode === 'split' ? 'scan' : 'split'
         if (connected) sock.current?.send({ type: 'set_mode', mode: next })
         else {
-          setModeChange({ type: 'mode_change', from: mode, to: next, reason: 'manual toggle' })
+          setModeChange({ type: 'mode_change', from: mode, to: next, reason: `Switching to ${next} mode.` })
           setMode(next)
         }
       }),
     [dispatch, mode, connected],
   )
 
-  const board = boards.find((b) => b.id === boardId)
-  const baseItems = board ? board.items : boards.map((b) => b.title)
+  const allBoards = [...boards, SPELL_BOARD]
+  const board = allBoards.find((b) => b.id === boardId)
+  const topLevel = [...predictions.map((p) => PREDICTION_MARK + p), ...allBoards.map((b) => b.title)]
+  const baseItems = board ? board.items : topLevel
   const items = mode === 'scan' ? [...baseItems, SCAN_BACK, SCAN_HELP] : baseItems
+
+  const say = (text: string) => {
+    // Confirmed selection — the only place TTS fires.
+    speak(text)
+    setSpoken((s) => [text, ...s].slice(0, 5))
+    sock.current?.send({ type: 'spoken', text, ts: Date.now() })
+  }
 
   const onSelect = (item: string) => {
     if (item === SCAN_HELP) return help()
     if (item === SCAN_BACK) return setBoardId(null)
-    if (!board) {
-      setBoardId(boards.find((b) => b.title === item)?.id ?? null)
+    if (board?.id === SPELL_BOARD.id) {
+      if (item === SPELL_SPEAK) {
+        if (spelled.trim()) say(spelled.trim())
+        setSpelled('')
+        setBoardId(null)
+      } else if (item === SPELL_DELETE) setSpelled((t) => t.slice(0, -1))
+      else if (item === SPELL_SPACE) setSpelled((t) => t + ' ')
+      else setSpelled((t) => t + item)
       return
     }
-    // Confirmed selection — the only place TTS fires.
-    speak(item)
-    setSpoken((s) => [item, ...s].slice(0, 5))
-    sock.current?.send({ type: 'spoken', text: item, ts: Date.now() })
+    if (!board) {
+      if (item.startsWith(PREDICTION_MARK)) return say(item.slice(PREDICTION_MARK.length))
+      setBoardId(allBoards.find((b) => b.title === item)?.id ?? null)
+      return
+    }
+    say(item)
     setBoardId(null)
   }
+
+  const controls =
+    mode === 'split'
+      ? [['◀', mapping.LEFT], ['▶', mapping.RIGHT], ['HELP', mapping.HELP]]
+      : [['Select', mapping.SELECT], ['HELP', mapping.HELP]]
 
   return (
     <main className="patient">
       <header>
-        <span>{board ? board.title : 'Boards'}</span>
-        <span className="status">{mode} · {connected ? 'online' : 'offline'}</span>
+        <span>{board ? board.title : 'Home'}</span>
+        <span className="status">
+          {controls
+            .filter(([, g]) => g)
+            .map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`)
+            .join(' · ')}
+          {' · '}
+          {mode} · {connected ? 'online' : 'offline'}
+        </span>
       </header>
       <ModeBanner change={modeChange} />
-      <PredictionStrip phrases={[]} />
+      {!board && <PredictionStrip phrases={predictions} loading={predicting} />}
+      {board?.id === SPELL_BOARD.id && <LetterBoard text={spelled} />}
       {mode === 'split' ? (
         <SplitBoard items={items} command={command} onSelect={onSelect} />
       ) : (

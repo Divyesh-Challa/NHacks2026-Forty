@@ -6,12 +6,15 @@ import type { BoardProps } from './SplitBoard'
 export function ScanBoard({ items, command, onSelect, intervalMs }: BoardProps & { intervalMs: number }) {
   const [index, setIndex] = useState(0)
 
-  useEffect(() => setIndex(0), [items])
+  const itemsKey = items.join('\n')
+  const count = items.length
+
+  useEffect(() => setIndex(0), [itemsKey])
 
   useEffect(() => {
-    const t = setInterval(() => setIndex((i) => (i + 1) % items.length), intervalMs)
+    const t = setInterval(() => setIndex((i) => (i + 1) % count), intervalMs)
     return () => clearInterval(t)
-  }, [items, intervalMs])
+  }, [itemsKey, count, intervalMs])
 
   useEffect(() => {
     if (command?.command === 'SELECT') onSelect(items[index])

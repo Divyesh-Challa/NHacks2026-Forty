@@ -45,11 +45,11 @@ Both of you produce the same output: dicts from `signal/messages.py`, yielded by
 
 ## Role C: Patient frontend (owner: Tolu)
 Done = demo step 1 works with the keyboard alone.
-- [ ] `SplitBoard` / `ScanBoard` polish: big targets, high contrast, readable at a distance
-- [ ] `LetterBoard` (spelling via the same split/scan logic)
-- [ ] `PredictionStrip`: call `/predict` after each message; selecting a chip speaks it
-- [ ] `ModeBanner` copy: "Eye movement is getting harder to read. Switching to jaw clench."
-- [ ] Show the current mapping (which gesture does what) from `reliability` events
+- [ ] `SplitBoard` / `ScanBoard` visual polish: big targets, high contrast, readable at a distance (logic done; reset-loop bug fixed)
+- [x] `LetterBoard`: "Spell" board with frequency-ordered letters, Space/Delete/Speak
+- [x] `PredictionStrip`: `/predict` after each message; predictions are the first items on the home board (★), one selection to speak
+- [x] `ModeBanner` shows the backend's plain-language reason
+- [x] Header shows the current mapping (which gesture does what)
 - [ ] Pairing flow: patient page uses the stored token
 
 ## Role D: Caregiver app + auth + prediction (owner: Fikayo)
@@ -57,7 +57,7 @@ Done = demo step 3 works on a phone browser.
 - [x] bcrypt-hashed caregiver in the DB; `/auth/login` and `/pair` check the DB (done with Role A's DB work)
 - [x] `backend/app/auth.py`: JWT required on caregiver routes (`PUT boards`, `GET messages`) + caregiver WS (`?token=`), scoped to the caregiver's patient
 - [x] `backend/app/predict.py`: Anthropic API, 2 s timeout, JSON phrases, fallback list (needs `ANTHROPIC_API_KEY` in `.env` to use the model)
-- [ ] `Caregiver.tsx`: message history, board editor (PUT → live push to patient), reliability chart over time
+- [x] `Caregiver.tsx`: Live / History / Boards / Signals tabs; HELP banner + 3-tone sound + Notification; board editor (PUT → live push); reliability chart with the 60% line
 - [ ] Test HELP alert sound + Notification on a phone over the LAN (`VITE_API_URL=http://<laptop-ip>:8000`)
 
 ---
