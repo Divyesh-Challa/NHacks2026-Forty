@@ -17,6 +17,7 @@ from pathlib import Path
 from tools.streams import SyntheticStream, open_stream
 
 GESTURES = ["look_left", "look_right", "blink_double", "jaw_clench"]
+VERTICAL = ["look_up", "look_down"]  # real hardware only: the synthetic generator has no vertical looks
 PROMPT_S = 2.0
 HOLD_PROMPT_S = 3.5  # jaw_hold needs help_hold_ms (2 s) plus reaction time
 REST_S = 2.0
@@ -24,6 +25,8 @@ OUT_DIR = Path(__file__).resolve().parents[1] / "recordings"
 INSTRUCTIONS = {
     "look_left": "LOOK LEFT, then back to centre",
     "look_right": "LOOK RIGHT, then back to centre",
+    "look_up": "LOOK UP and hold for a second, then back to centre",
+    "look_down": "LOOK DOWN and hold for a second, then back to centre",
     "blink_double": "DOUBLE BLINK",
     "jaw_clench": "CLENCH your jaw briefly",
     "jaw_hold": "HOLD a jaw clench until the next prompt",
@@ -34,8 +37,8 @@ def prompt_seconds(gesture: str) -> float:
     return HOLD_PROMPT_S if gesture == "jaw_hold" else PROMPT_S
 
 
-def prompts_for(reps: int, rng=random) -> list[str]:
-    prompts = GESTURES * reps + ["jaw_hold"] * max(2, reps // 4)
+def prompts_for(reps: int, rng=random, vertical: bool = False) -> list[str]:
+    prompts = (GESTURES + (VERTICAL if vertical else [])) * reps + ["jaw_hold"] * max(2, reps // 4)
     rng.shuffle(prompts)
     return prompts
 
@@ -43,7 +46,7 @@ def prompts_for(reps: int, rng=random) -> list[str]:
 def record(stream, reps: int, rest: float = 20.0, out: Path | None = None) -> Path:
     OUT_DIR.mkdir(exist_ok=True)
     out = out or OUT_DIR / f"session-{datetime.now():%Y%m%d-%H%M%S}.csv"
-    prompts = prompts_for(reps)
+    prompts = prompts_for(reps, vertical=not isinstance(stream, SyntheticStream))
     with out.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["t_us", "a0", "a1", "a2", "label"])

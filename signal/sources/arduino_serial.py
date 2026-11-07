@@ -1,6 +1,6 @@
 """Arduino + BioAmp EXG Pill source.
 
-Reads `t_us,a0,a1,a2` lines at 115200 baud from arduino/relay_exg/relay_exg.ino.
+Reads `t_us,a0,a1,a2` lines at 250000 baud from arduino/relay_exg/relay_exg.ino.
 Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG.
 Samples go through sources/pipeline.py (filters → detectors → reliability), same as
 `run.py --source synthetic --detectors real`.
@@ -21,7 +21,7 @@ def parse_line(line: str | bytes) -> tuple[int, int, int, int] | None:
     return t, a0, a1, a2
 
 
-def ArduinoSource(port: str | None, baud: int = 115200):
+def ArduinoSource(port: str | None, baud: int = 250000):
     if not port:
         raise SystemExit("--port is required for --source arduino (e.g. /dev/tty.usbmodem1101; `ls /dev/tty.usb*`)")
     from sources.pipeline import PipelineSource

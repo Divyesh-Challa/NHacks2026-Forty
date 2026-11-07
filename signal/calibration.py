@@ -35,7 +35,12 @@ from reliability import score
 
 HERE = Path(__file__).resolve().parent
 CAL_PATH = HERE / "calibration.json"
-SIGNAL_GESTURES = {"eog_h": ["look_left", "look_right"], "blink": ["blink_double"], "jaw": ["jaw_clench", "jaw_hold"]}
+SIGNAL_GESTURES = {
+    "eog_h": ["look_left", "look_right"],
+    "eog_v": ["look_down", "look_up"],  # only scored if the recording has these prompts (hardware sessions)
+    "blink": ["blink_double"],
+    "jaw": ["jaw_clench", "jaw_hold"],
+}
 MATCH_SLACK_US = 800_000  # a detection up to this long after the window still counts (jaw reports on release)
 REST_SKIP_US = 1_000_000  # ignore the first second of rest after a prompt (eyes returning, late release)
 
@@ -62,6 +67,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     segs = segments(t, labels)
     pre = int(0.5 * 1e6)
     eog: dict[str, list[float]] = {"look_left": [], "look_right": []}
+    vert: dict[str, list[float]] = {"look_down": [], "look_up": []}
     blink: list[float] = []
     jaw: list[float] = []
     for label, a, b in segs:
@@ -69,12 +75,15 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
         if label in eog and p.stop > p.start:
             d = h[w] - np.median(h[p])
             eog[label].append(float(d[np.argmax(np.abs(d))]))
+        elif label in vert and p.stop > p.start:
+            d = v[w] - np.median(v[p])
+            vert[label].append(float(d[np.argmax(np.abs(d))]))
         elif label == "blink_double" and p.stop > p.start:
             blink.append(float(np.max(v[w] - np.median(v[p]))))
         elif label in ("jaw_clench", "jaw_hold"):
             jaw.append(float(np.max(env[w])))
 
-    rest_h, rest_v, rest_env = [], [], []
+    rest_h, rest_v, rest_va, rest_env = [], [], [], []
     for label, a, b in segs:
         if label != "rest":
             continue
@@ -83,21 +92,28 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
             w = _window(t, c, c + 1_000_000)
             rest_h.append(float(np.max(np.abs(h[w] - np.median(h[w])))))
             rest_v.append(float(np.max(v[w] - np.median(v[w]))))
+            rest_va.append(float(np.max(np.abs(v[w] - np.median(v[w])))))
             rest_env.append(float(np.percentile(env[w], 95)))
 
     lefts = eog["look_left"]
     invert = bool(lefts) and float(np.median(lefts)) > 0  # look_left should read negative
     eog_amps = [abs(x) for x in eog["look_left"] + eog["look_right"]]
+    ups = vert["look_up"]
+    vert_invert = bool(ups) and float(np.median(ups)) < 0  # look_up should read positive
+    vert_amps = [abs(x) for x in vert["look_down"] + ups]
     pct = lambda xs, q: float(np.percentile(xs, q)) if xs else 0.0  # noqa: E731
     return {
-        "eog_invert": invert,
+        "eog_invert": False,
+        "vert_invert": vert_invert,
         "amplitude": {
             "eog_h": float(np.median(eog_amps)) if eog_amps else None,
+            "eog_v": float(np.median(vert_amps)) if vert_amps else None,
             "blink": float(np.median(blink)) if blink else None,
             "jaw": float(np.median(jaw)) if jaw else None,
         },
         # Rest blinks are real blinks, so blink noise uses the median chunk, not the tail.
-        "noise": {"eog_h": pct(rest_h, 90), "blink": pct(rest_v, 50), "jaw": pct(rest_env, 90)},
+        # Rest blinks hit A1 too, so vertical noise is the median chunk like blink; a look must also outlast a blink.
+        "noise": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_v, 50), "jaw": pct(rest_env, 90)},
     }
 
 
@@ -105,7 +121,8 @@ def thresholds(m: dict) -> dict:
     """Detector settings from measured amplitudes (keeps the defaults for anything not measured)."""
     s = dict(DETECTORS)
     s["eog_invert"] = m["eog_invert"]
-    for sig, key in (("eog_h", "eog"), ("blink", "blink"), ("jaw", "jaw")):
+    s["vert_invert"] = m["vert_invert"]
+    for sig, key in (("eog_h", "eog"), ("eog_v", "vert"), ("blink", "blink"), ("jaw", "jaw")):
         amp, noise = m["amplitude"][sig], m["noise"][sig]
         if not amp:
             continue
@@ -216,6 +233,7 @@ def report(result: dict) -> str:
     s = result["settings"]
     lines.append(
         f"thresholds: eog {s['eog_threshold']} (floor {s['eog_floor']}, invert={s['eog_invert']}), "
+        f"look up/down {s['vert_threshold']} (floor {s['vert_floor']}, invert={s['vert_invert']}), "
         f"blink {s['blink_threshold']} (floor {s['blink_floor']}), jaw {s['jaw_threshold']} (floor {s['jaw_floor']})"
     )
     return "\n".join(lines)

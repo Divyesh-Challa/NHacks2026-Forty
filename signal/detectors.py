@@ -87,11 +87,15 @@ class _Excursion:
 
 class EogDetector(_Excursion):
     source = "eog_h"
+    prefix = "eog"  # settings keys: {prefix}_threshold / _floor / _invert / _confirm_ms
+    names = ("look_left", "look_right")  # (negative, positive) excursion
 
     def __init__(self, fs: float = FS, settings: dict = DETECTORS) -> None:
-        super().__init__(fs, settings["eog_threshold"], settings["eog_floor"])
-        self.polarity = -1.0 if settings["eog_invert"] else 1.0
-        self.confirm_us = settings["eog_confirm_ms"] * 1000
+        p = self.prefix
+        super().__init__(fs, settings[f"{p}_threshold"], settings[f"{p}_floor"])
+        self.polarity = -1.0 if settings[f"{p}_invert"] else 1.0
+        self.confirm_us = settings[f"{p}_confirm_ms"] * 1000
+        self.min_miss_us = 0  # excursions shorter than this are not reported as near-misses
         self.emitted = False
         self.above_since: int | None = None
 
@@ -111,13 +115,13 @@ class EogDetector(_Excursion):
                 if m > self.threshold:
                     self.above_since = ti if self.above_since is None else self.above_since
                     if ti - self.above_since >= self.confirm_us:
-                        gesture = "look_left" if self.sign < 0 else "look_right"
+                        gesture = self.names[0] if self.sign < 0 else self.names[1]
                         out.append(Detection(self.source, gesture, confidence(self.peak, self.threshold), int(ti // 1000)))
                         self.emitted = True
                 else:
                     self.above_since = None
             if m < self.floor / 2:  # eyes back at centre
-                if not self.emitted:
+                if not self.emitted and ti - self.start >= self.min_miss_us:
                     out.append(NearMiss(self.source, self.peak, int(ti // 1000)))
                 self.active = False
                 self.ready_at = ti + (self.refractory_us if self.emitted else 0)
@@ -125,6 +129,22 @@ class EogDetector(_Excursion):
                 self.active = False
                 self.base.value = xi
         return out
+
+
+class VerticalEogDetector(EogDetector):
+    """A1 look up / look down: same excursion logic as A0, tuned by vert_* settings.
+
+    A blink is also a vertical excursion on A1, so a look must outlast one: vert_confirm_ms is
+    set above blink_max_ms, and shorter excursions (blinks) are not counted as near-misses.
+    """
+
+    source = "eog_v"
+    prefix = "vert"
+    names = ("look_down", "look_up")
+
+    def __init__(self, fs: float = FS, settings: dict = DETECTORS) -> None:
+        super().__init__(fs, settings)
+        self.min_miss_us = settings["blink_max_ms"] * 1000
 
 
 class BlinkDetector(_Excursion):
@@ -224,11 +244,13 @@ class Pipeline:
         self.eog = EogDetector(fs, s)
         self.blink = BlinkDetector(fs, s)
         self.jaw = JawDetector(fs, s)
-        self.detectors = {"eog_h": self.eog, "blink": self.blink, "jaw": self.jaw}
+        self.vert = VerticalEogDetector(fs, s)
+        # Keep eog_h/blink/jaw first: plot_live indexes this dict by channel.
+        self.detectors = {"eog_h": self.eog, "blink": self.blink, "jaw": self.jaw, "eog_v": self.vert}
         self.last_features: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
 
     def set_gain(self, signal: str, factor: float) -> None:
-        for s in ["eog_h", "blink"] if signal == "eye" else [signal]:
+        for s in ["eog_h", "eog_v", "blink"] if signal == "eye" else [signal]:
             if s in self.detectors:
                 self.detectors[s].gain = factor
 
@@ -243,5 +265,5 @@ class Pipeline:
             return []
         h, v, env = self.last_features = self.features(rows)
         t = rows[:, 0]
-        events = self.eog.process(h, t) + self.blink.process(v, t) + self.jaw.process(env, t)
+        events = self.eog.process(h, t) + self.blink.process(v, t) + self.jaw.process(env, t) + self.vert.process(v, t)
         return sorted(events, key=lambda e: e.ts)

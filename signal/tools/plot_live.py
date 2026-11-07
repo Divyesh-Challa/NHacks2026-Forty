@@ -22,7 +22,7 @@ from tools.streams import FS, SyntheticStream, open_stream
 
 WINDOW_S = 5
 LABELS = ["A0 · horizontal EOG", "A1 · vertical EOG / blink", "A2 · jaw EMG"]
-FILTERED_LABELS = ["A0 · EOG level (−left / +right)", "A1 · blink level", "A2 · jaw envelope"]
+FILTERED_LABELS = ["A0 · EOG level (−left / +right)", "A1 · blink (red) / look up-down (blue)", "A2 · jaw envelope"]
 KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double", "j": "jaw_clench", "h": "jaw_hold"}
 
 
@@ -55,6 +55,9 @@ def main() -> None:
             for sgn in signs:
                 ax.axhline(sgn * det.threshold, color="tab:red", lw=1)
                 ax.axhline(sgn * det.floor, color="tab:red", lw=1, ls="--")
+        for sgn in (-1, 1):  # look up (+) / down (−) on A1; a look must outlast a blink to count
+            axes[1].axhline(sgn * d["eog_v"].threshold, color="tab:blue", lw=1)
+            axes[1].axhline(sgn * d["eog_v"].floor, color="tab:blue", lw=1, ls="--")
     axes[-1].set_xlabel("seconds")
     status = fig.text(0.01, 0.01, "", fontsize=9)
 
@@ -96,7 +99,8 @@ def main() -> None:
             lo, hi = y.min(), y.max()
             if pipeline:  # keep the threshold lines in view
                 det = list(pipeline.detectors.values())[ch]
-                lo, hi = min(lo, -det.threshold if ch == 0 else 0), max(hi, det.threshold)
+                thr = max(det.threshold, pipeline.vert.threshold) if ch == 1 else det.threshold
+                lo, hi = min(lo, -thr if ch <= 1 else 0), max(hi, thr)
             pad = max(10.0, (hi - lo) * 0.1)
             ax.set_ylim(lo - pad, hi + pad)
         return lines
