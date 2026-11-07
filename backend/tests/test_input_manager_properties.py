@@ -105,7 +105,7 @@ def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
         changes = step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
         assert not changes, f"hover seed={seed} step={i}: unexpected mode_change {changes}"
         assert (dict(im.healthy), im.current_mapping(), im.mode) == frozen, (
-            f"hover seed={seed} step={i}: {frozen[1]} -> {im.current_mapping()}"
+            f"hover seed={seed} step={i}: {frozen[:2]} -> {(im.healthy, im.current_mapping())}"
         )
     return True
 
