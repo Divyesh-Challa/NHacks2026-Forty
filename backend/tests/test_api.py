@@ -31,3 +31,11 @@ def test_mode_change_serializes_from() -> None:
         patient.send_json({"type": "set_mode", "mode": "split"})
         patient.receive_json()
     assert msg == {"type": "mode_change", "from": "split", "to": "scan", "reason": "manual toggle"}
+
+
+def test_jaw_hold_alerts_caregiver() -> None:
+    with client.websocket_connect("/ws/caregiver/p1") as caregiver:
+        with client.websocket_connect("/ws/signal?patient_id=p1") as sig:
+            sig.send_json({"type": "gesture", "source": "jaw", "gesture": "jaw_hold", "confidence": 0.9, "ts": 5})
+            msg = caregiver.receive_json()
+    assert msg["type"] == "alert" and msg["message"] == "HELP"
