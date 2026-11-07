@@ -23,6 +23,19 @@ emg_band_hz = [20.0, 150.0]
 notch_hz = 60.0
 refractory_ms = 400
 reliability_interval_ms = 1000
+attempt_window = 8           # reliability: accuracy over the last N gesture attempts per signal
+rest_window = 20             # reliability: false-trigger rate over the last N rest seconds per signal
+default_accuracy = 0.9       # seed when a signal has no calibration yet
+default_false_trigger_rate = 0.05
+
+[synthetic]
+adc_mid = 512                # 10-bit ADC centre, same units the Arduino prints
+noise = 4.0                  # white noise (ADC counts, std)
+mains = 6.0                  # 60 Hz pickup amplitude
+drift = 25.0                 # slow baseline wander amplitude
+saccade = 160.0              # look left/right step on A0
+blink = 220.0                # blink spike on A1
+emg = 70.0                   # jaw EMG burst std on A2
 
 [predict]
 timeout_s = 2.0
