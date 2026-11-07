@@ -9,13 +9,23 @@ export interface ReliabilityPoint {
 }
 
 const SERIES = [
-  { key: 'eog_h', label: 'Eye movement', color: '#3987e5' },
-  { key: 'blink', label: 'Blink', color: '#d95926' },
-  { key: 'jaw', label: 'Jaw', color: '#199e70' },
+  { key: 'eog_h', label: 'Eye movement', short: 'Eye', color: '#3987e5' },
+  { key: 'blink', label: 'Blink', short: 'Blink', color: '#d95926' },
+  { key: 'jaw', label: 'Jaw', short: 'Jaw', color: '#199e70' },
 ]
+const LABEL_GAP = 12
+
+/** End-of-line label y positions, nudged apart so overlapping lines don't stack their labels. */
+function labelYs(ends: { key: string; y: number }[]): Record<string, number> {
+  const sorted = [...ends].sort((a, b) => a.y - b.y)
+  for (let i = 1; i < sorted.length; i++) {
+    sorted[i].y = Math.max(sorted[i].y, sorted[i - 1].y + LABEL_GAP)
+  }
+  return Object.fromEntries(sorted.map((e) => [e.key, e.y]))
+}
 const W = 340
 const H = 180
-const PAD = { top: 12, right: 92, bottom: 22, left: 34 }
+const PAD = { top: 12, right: 70, bottom: 22, left: 34 }
 const PLOT_W = W - PAD.left - PAD.right
 const PLOT_H = H - PAD.top - PAD.bottom
 
@@ -31,6 +41,9 @@ export function ReliabilityChart({ points, cutoff }: { points: ReliabilityPoint[
   const x = (t: number) => PAD.left + ((t - t0) / span) * PLOT_W
   const last = points[points.length - 1]
   const hovered = hover === null ? null : points[hover]
+  const labelY = labelYs(
+    SERIES.filter((s) => last.signals[s.key] !== undefined).map((s) => ({ key: s.key, y: y(last.signals[s.key]) + 4 })),
+  )
 
   const onMove = (e: React.PointerEvent<SVGRectElement>) => {
     const box = e.currentTarget.getBoundingClientRect()
@@ -73,8 +86,8 @@ export function ReliabilityChart({ points, cutoff }: { points: ReliabilityPoint[
             <g key={s.key}>
               <path d={d} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
               {end !== undefined && (
-                <text className="direct-label" x={PAD.left + PLOT_W + 6} y={y(end) + 4}>
-                  {s.label} {pct(end)}
+                <text className="direct-label" x={PAD.left + PLOT_W + 6} y={labelY[s.key]}>
+                  {s.short} {pct(end)}
                 </text>
               )}
             </g>

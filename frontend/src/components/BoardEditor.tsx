@@ -57,8 +57,10 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
       <button className="secondary" onClick={() => setDrafts((d) => [...d, { id: '', title: 'New board', text: '' }])}>
         + Add board
       </button>
-      <button onClick={save}>Save and send to patient</button>
-      {status && <p className="muted">{status}</p>}
+      <div className="save-bar">
+        <button onClick={save}>Save and send to patient</button>
+        {status && <p className="muted small">{status}</p>}
+      </div>
     </div>
   )
 }

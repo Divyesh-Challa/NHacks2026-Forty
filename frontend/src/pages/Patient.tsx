@@ -152,10 +152,8 @@ export default function Patient() {
     setBoardId(null)
   }
 
-  const controls =
-    mode === 'split'
-      ? [['◀', mapping.LEFT], ['▶', mapping.RIGHT], ['HELP', mapping.HELP]]
-      : [['Select', mapping.SELECT], ['HELP', mapping.HELP]]
+  // Split mode shows LEFT/RIGHT on the halves themselves; the header lists the rest.
+  const controls = [['Select', mapping.SELECT], ['HELP', mapping.HELP]]
 
   return (
     <main className="patient">
@@ -171,10 +169,16 @@ export default function Patient() {
         </span>
       </header>
       <ModeBanner change={modeChange} />
-      {!board && <PredictionStrip phrases={predictions} loading={predicting} />}
+      {!board && predicting && !predictions.length && <PredictionStrip phrases={[]} loading />}
       {board?.id === SPELL_BOARD.id && <LetterBoard text={spelled} />}
       {mode === 'split' ? (
-        <SplitBoard items={items} command={command} onSelect={onSelect} />
+        <SplitBoard
+          items={items}
+          command={command}
+          onSelect={onSelect}
+          leftHint={mapping.LEFT ? GESTURE_LABELS[mapping.LEFT] ?? mapping.LEFT : 'left arrow'}
+          rightHint={mapping.RIGHT ? GESTURE_LABELS[mapping.RIGHT] ?? mapping.RIGHT : 'right arrow'}
+        />
       ) : (
         <ScanBoard items={items} command={command} onSelect={onSelect} intervalMs={scanMs} />
       )}

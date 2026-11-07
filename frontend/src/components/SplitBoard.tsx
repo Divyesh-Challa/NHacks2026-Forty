@@ -9,7 +9,17 @@ export interface BoardProps {
   onSelect: (item: string) => void
 }
 
-export function SplitBoard({ items, command, onSelect }: BoardProps) {
+const DENSE_AT = 7 // more items than this in a half → wrap into a grid with smaller text
+
+const itemClass = (item: string) => `item${item.includes('HELP') ? ' help' : ''}`
+
+export function SplitBoard({
+  items,
+  command,
+  onSelect,
+  leftHint,
+  rightHint,
+}: BoardProps & { leftHint?: string; rightHint?: string }) {
   const [range, setRange] = useState<[number, number]>([0, items.length])
   // Reset only when the list's contents change, not on every new array from the parent.
   const itemsKey = items.join('\n')
@@ -34,10 +44,22 @@ export function SplitBoard({ items, command, onSelect }: BoardProps) {
 
   const [lo, hi] = range
   const mid = Math.ceil((lo + hi) / 2)
+  const halves: [string[], string | undefined][] = [
+    [items.slice(lo, mid), leftHint && `◀ ${leftHint}`],
+    [items.slice(mid, hi), rightHint && `${rightHint} ▶`],
+  ]
   return (
     <div className="split">
-      <div className="half">{items.slice(lo, mid).map((i) => <div key={i} className="item">{i}</div>)}</div>
-      <div className="half">{items.slice(mid, hi).map((i) => <div key={i} className="item">{i}</div>)}</div>
+      {halves.map(([part, hint], side) => (
+        <div key={side} className={`half${part.length > DENSE_AT ? ' dense' : ''}`}>
+          {hint && <div className={`half-hint ${side ? 'right' : 'left'}`}>{hint}</div>}
+          <div className="half-items">
+            {part.map((i) => (
+              <div key={i} className={itemClass(i)}>{i}</div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

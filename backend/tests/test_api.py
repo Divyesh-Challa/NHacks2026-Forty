@@ -50,7 +50,7 @@ def test_mode_change_serializes_from(client: TestClient) -> None:
         msg = patient.receive_json()
         patient.send_json({"type": "set_mode", "mode": "split"})
         patient.receive_json()
-    assert msg == {"type": "mode_change", "from": "split", "to": "scan", "reason": "manual toggle"}
+    assert msg == {"type": "mode_change", "from": "split", "to": "scan", "reason": "Switched to scan mode by hand (testing)."}
 
 
 def test_jaw_hold_alerts_caregiver(client: TestClient, token: str) -> None:

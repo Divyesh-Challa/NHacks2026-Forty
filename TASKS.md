@@ -45,7 +45,7 @@ Both of you produce the same output: dicts from `signal/messages.py`, yielded by
 
 ## Role C: Patient frontend (owner: Tolu)
 Done = demo step 1 works with the keyboard alone.
-- [ ] `SplitBoard` / `ScanBoard` visual polish: big targets, high contrast, readable at a distance (logic done; reset-loop bug fixed)
+- [x] `SplitBoard` / `ScanBoard` visual polish: gesture hint on each half, dense grid for big boards (Spell), solid scan highlight + timer bar, red HELP
 - [x] `LetterBoard`: "Spell" board with frequency-ordered letters, Space/Delete/Speak
 - [x] `PredictionStrip`: `/predict` after each message; predictions are the first items on the home board (★), one selection to speak
 - [x] `ModeBanner` shows the backend's plain-language reason

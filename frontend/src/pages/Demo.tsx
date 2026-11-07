@@ -8,6 +8,14 @@ import { connect } from '../lib/ws'
 const PATIENT_ID = 'p1'
 const SIGNALS = ['eog_h', 'blink', 'jaw'] as const
 const LABELS: Record<string, string> = { eog_h: 'Eye movement', blink: 'Blink', jaw: 'Jaw' }
+const GESTURES: Record<string, string> = {
+  look_left: 'look left',
+  look_right: 'look right',
+  blink_double: 'double blink',
+  jaw_clench: 'jaw clench',
+  jaw_hold: 'jaw hold',
+  brow_raise: 'eyebrow raise',
+}
 
 export default function Demo() {
   const [rel, setRel] = useState<ReliabilityEvent | null>(null)
@@ -47,7 +55,7 @@ export default function Demo() {
 
       <h2>Mode: {rel?.mode ?? '—'}</h2>
       <p className="muted">
-        {rel ? Object.entries(rel.mapping).map(([cmd, g]) => `${cmd} = ${g}`).join(' · ') : 'No reliability yet'}
+        {rel ? Object.entries(rel.mapping).map(([cmd, g]) => `${cmd}: ${GESTURES[g as string] ?? g}`).join(' · ') : 'No reliability yet'}
       </p>
       {SIGNALS.map((s) => {
         const r = rel?.signals[s]
