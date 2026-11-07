@@ -43,6 +43,10 @@ blink_threshold = 110.0
 blink_floor = 40.0
 blink_max_ms = 400            # longer vertical excursions are looks, not blinks
 double_blink_ms = 700         # two blinks within this = blink_double
+vert_threshold = 200.0        # A1 look up/down (held, so it outlasts a blink)
+vert_floor = 100.0
+vert_invert = false           # flip if look_up reads negative on A1 (calibration detects this)
+vert_confirm_ms = 450         # must exceed blink_max_ms, or every blink would read as a look
 jaw_threshold = 20.0
 jaw_floor = 8.0
 jaw_min_ms = 100              # shorter bursts are noise
