@@ -1,5 +1,5 @@
 // Caregiver phrase-board editor. Saving PUTs the boards; the backend pushes them live to the patient.
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Board } from '../lib/types'
 
 interface Draft {
@@ -15,7 +15,12 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
   const [drafts, setDrafts] = useState<Draft[]>(boards.map(toDraft))
   const [status, setStatus] = useState('')
 
-  useEffect(() => setDrafts(boards.map(toDraft)), [boards])
+  // Reset the drafts when a new boards list arrives (adjusting state during render, not in an effect).
+  const [seen, setSeen] = useState(boards)
+  if (seen !== boards) {
+    setSeen(boards)
+    setDrafts(boards.map(toDraft))
+  }
 
   const update = (i: number, patch: Partial<Draft>) =>
     setDrafts((d) => d.map((x, j) => (j === i ? { ...x, ...patch } : x)))
