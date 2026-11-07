@@ -13,7 +13,7 @@ from collections import defaultdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from . import db
+from . import auth, db
 from .input_manager import InputManager
 from .models import AlertEvent, GestureEvent, ModeChangeEvent, SignalReliabilityEvent, SpokenEvent
 
@@ -115,8 +115,10 @@ async def ws_patient(ws: WebSocket, patient_id: str) -> None:
 
 
 @router.websocket("/ws/caregiver/{patient_id}")
-async def ws_caregiver(ws: WebSocket, patient_id: str) -> None:
-    # TODO (Role D): require a caregiver JWT via ?token=
+async def ws_caregiver(ws: WebSocket, patient_id: str, token: str | None = None) -> None:
+    if not auth.caregiver_for_ws(token, patient_id):
+        await ws.close(code=4401)
+        return
     await ws.accept()
     hub.caregivers[patient_id].add(ws)
     try:

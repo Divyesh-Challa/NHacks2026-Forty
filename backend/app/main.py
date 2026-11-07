@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import auth, db, predict
@@ -33,10 +33,11 @@ def config() -> dict:
 
 @app.post("/auth/login")
 def login(body: LoginRequest) -> dict:
-    token = auth.login(body.email, body.password)
-    if not token:
+    result = auth.login(body.email, body.password)
+    if not result:
         raise HTTPException(401, "invalid credentials")
-    return {"token": token}
+    patient_id, token = result
+    return {"patient_id": patient_id, "token": token}
 
 
 @app.post("/pair")
@@ -53,9 +54,8 @@ def get_boards(patient_id: str) -> list[Board]:
     return [Board(**b) for b in db.get_boards(patient_id)]
 
 
-@app.put("/patients/{patient_id}/boards")
+@app.put("/patients/{patient_id}/boards", dependencies=[Depends(auth.require_caregiver)])
 async def put_boards(patient_id: str, boards: list[Board]) -> list[Board]:
-    # TODO (Role D): require caregiver JWT
     db.set_boards(patient_id, [b.model_dump() for b in boards])
     await hub.to_patient(patient_id, {"type": "boards_updated", "boards": [b.model_dump() for b in boards]})
     return boards
@@ -72,7 +72,7 @@ def post_calibration(body: CalibrationRequest) -> dict:
     return {"ok": True}
 
 
-@app.get("/patients/{patient_id}/messages")
+@app.get("/patients/{patient_id}/messages", dependencies=[Depends(auth.require_caregiver)])
 def get_messages(patient_id: str) -> list[dict]:
     return db.get_messages(patient_id)
 

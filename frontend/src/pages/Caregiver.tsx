@@ -27,7 +27,7 @@ export default function Caregiver() {
   useEffect(() => {
     if (!token) return
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
-    const s = connect(`/ws/caregiver/${PATIENT_ID}`, (ev) => {
+    const s = connect(`/ws/caregiver/${PATIENT_ID}?token=${encodeURIComponent(token)}`, (ev) => {
       if (ev.type === 'alert') {
         beep()
         if ('Notification' in window && Notification.permission === 'granted') new Notification('Relay: HELP requested')

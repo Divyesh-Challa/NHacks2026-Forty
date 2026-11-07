@@ -54,8 +54,8 @@ Done = demo step 1 works with the keyboard alone.
 ## Role D: Caregiver app + auth + prediction (owner: Fikayo)
 Done = demo step 3 works on a phone browser.
 - [x] bcrypt-hashed caregiver in the DB; `/auth/login` and `/pair` check the DB (done with Role A's DB work)
-- [ ] `backend/app/auth.py`: JWT required on caregiver routes (`PUT boards`, `GET messages`) + caregiver WS (`?token=`)
-- [ ] `backend/app/predict.py`: Anthropic API, 2 s timeout, JSON phrases, fallback list
+- [x] `backend/app/auth.py`: JWT required on caregiver routes (`PUT boards`, `GET messages`) + caregiver WS (`?token=`), scoped to the caregiver's patient
+- [x] `backend/app/predict.py`: Anthropic API, 2 s timeout, JSON phrases, fallback list (needs `ANTHROPIC_API_KEY` in `.env` to use the model)
 - [ ] `Caregiver.tsx`: message history, board editor (PUT → live push to patient), reliability chart over time
 - [ ] Test HELP alert sound + Notification on a phone over the LAN (`VITE_API_URL=http://<laptop-ip>:8000`)
 
