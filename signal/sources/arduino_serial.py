@@ -1,9 +1,9 @@
-"""Arduino + BioAmp EXG Pill source. Owner: Role B (Saturday).
+"""Arduino + BioAmp EXG Pill source.
 
 Reads `t_us,a0,a1,a2` lines at 115200 baud from arduino/relay_exg/relay_exg.ino.
 Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG.
-TODO: open serial port (pyserial), parse lines, feed filters -> detectors -> reliability,
-yield messages.gesture()/messages.reliability() dicts like SyntheticSource.events().
+Samples go through sources/pipeline.py (filters → detectors → reliability), same as
+`run.py --source synthetic --detectors real`.
 """
 
 
@@ -21,13 +21,10 @@ def parse_line(line: str | bytes) -> tuple[int, int, int, int] | None:
     return t, a0, a1, a2
 
 
-class ArduinoSource:
-    def __init__(self, port: str, baud: int = 115200) -> None:
-        self.port, self.baud = port, baud
+def ArduinoSource(port: str | None, baud: int = 115200):
+    if not port:
+        raise SystemExit("--port is required for --source arduino (e.g. /dev/tty.usbmodem1101; `ls /dev/tty.usb*`)")
+    from sources.pipeline import PipelineSource
+    from tools.streams import SerialStream
 
-    def degrade(self, signal: str, factor: float) -> None:
-        raise NotImplementedError
-
-    async def events(self):
-        raise NotImplementedError
-        yield  # pragma: no cover
+    return PipelineSource(SerialStream(port, baud))

@@ -19,3 +19,7 @@ dist/
 .DS_Store
 .vscode/
 .idea/
+
+# Signal: per-person calibration + recordings (not committed)
+signal/calibration.json
+signal/recordings/

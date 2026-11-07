@@ -2,6 +2,7 @@
 
   python run.py --source synthetic                  # scripted gestures + keyboard
   python run.py --source synthetic --script none    # keyboard only: type l/r/b/j/h + Enter
+  python run.py --source synthetic --detectors real # synthetic waveforms through the real filters/detectors
   python run.py --source arduino --port /dev/tty.usbmodem1101
 """
 
@@ -21,9 +22,18 @@ log = logging.getLogger("relay.signal")
 
 def make_source(args: argparse.Namespace):
     if args.source == "synthetic":
-        from sources.synthetic import DEFAULT_SCRIPT, SyntheticSource
+        from sources.synthetic import DEFAULT_SCRIPT
 
-        return SyntheticSource(interval_s=args.interval, script=None if args.script == "none" else DEFAULT_SCRIPT)
+        script = None if args.script == "none" else DEFAULT_SCRIPT
+        if args.detectors == "real":
+            from sources.pipeline import PipelineSource
+            from tools.streams import SyntheticStream
+
+            # Real waveforms take ~1 s per gesture, so space scripted ones further apart.
+            return PipelineSource(SyntheticStream(), script=script, interval_s=args.interval or 2.0)
+        from sources.synthetic import SyntheticSource
+
+        return SyntheticSource(interval_s=args.interval or 0.6, script=script)
     from sources.arduino_serial import ArduinoSource
 
     return ArduinoSource(args.port)
@@ -79,6 +89,7 @@ if __name__ == "__main__":
     p.add_argument("--port", default=None)
     p.add_argument("--patient", default="p1")
     p.add_argument("--url", default=BACKEND_WS_URL)
-    p.add_argument("--interval", type=float, default=0.6, help="synthetic: seconds between scripted gestures")
+    p.add_argument("--interval", type=float, default=None, help="synthetic: seconds between scripted gestures (0.6 simulated, 2.0 real)")
+    p.add_argument("--detectors", choices=["simulated", "real"], default="simulated", help="synthetic: simulated detector (demo default) or real filters/detectors")
     p.add_argument("--script", choices=["cycle", "none"], default="cycle", help="synthetic: scripted gestures or keyboard only")
     asyncio.run(main(p.parse_args()))
