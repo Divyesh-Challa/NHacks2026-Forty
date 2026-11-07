@@ -8,7 +8,7 @@ import random
 
 import pytest
 
-from app.input_manager import GESTURE_SOURCE, PRIMARY, SCAN_SELECT, InputManager
+from app.input_manager import GESTURE_SOURCE, PRIMARY, InputManager
 from app.models import ModeChangeEvent, SignalReliabilityEvent
 
 CFG = {
@@ -111,24 +111,15 @@ def test_random_sequences_keep_invariants(seed: int) -> None:
         check_health_rule(prev, im, hist, signals, tag)
 
 
-def scan_select_is_ambiguous(im: InputManager) -> bool:
-    """Scan mode picks SELECT by live reliability unless exactly one candidate is healthy (see probes below)."""
-    if im.mode != "scan":
-        return False
-    return sum(im._ok(g) for g in SCAN_SELECT) != 1
-
-
 def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
     """Random warm-up, then every reading in [0.6, 0.75): health cannot change, so neither can the mapping.
 
-    Returns False (and checks nothing) when the warm-up ends in the known-ambiguous scan state.
+    Returns True once the hover phase has been checked.
     """
     rng = random.Random(seed)
     im = InputManager(cfg=dict(CFG))
     for warm in gen_sequence(seed, signals, steps=60):
         step(im, warm)
-    if scan_select_is_ambiguous(im):
-        return False
     frozen = (dict(im.healthy), im.current_mapping(), im.mode)
     for i in range(HOVER_STEPS):
         changes = step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
@@ -144,7 +135,7 @@ def test_hover_between_cutoffs_never_flips_mapping() -> None:
     assert checked >= 400, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
 
 
-# --- known gaps (real findings, app code deliberately untouched) ---
+# --- scan-mode SELECT stays put while hovering (once known gaps, now fixed) ---
 
 def scan_all_unhealthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
@@ -168,7 +159,6 @@ def test_probe_setups_reach_intended_state() -> None:
     assert not im.healthy["eog_h"] and not im.healthy["jaw"]
 
 
-@pytest.mark.xfail(strict=True, reason="scan mode with NO healthy candidate falls back to max live reliability, so hovering flips SELECT")
 def test_hover_all_unhealthy_scan_keeps_select() -> None:
     im = scan_all_unhealthy()
     before = im.current_mapping()["SELECT"]
@@ -177,7 +167,6 @@ def test_hover_all_unhealthy_scan_keeps_select() -> None:
     assert im.current_mapping()["SELECT"] == before
 
 
-@pytest.mark.xfail(strict=True, reason="scan mode with 2+ healthy candidates (e.g. blink and brow) re-picks SELECT by live reliability")
 def test_hover_two_healthy_scan_candidates_keeps_select() -> None:
     im = scan_blink_and_brow_healthy()
     before = im.current_mapping()["SELECT"]
