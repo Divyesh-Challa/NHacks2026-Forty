@@ -151,7 +151,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 ### Signal service
 - **Synthetic source (build first):** generates realistic-ish waveforms at 250–500 Hz: EOG horizontal steps (look left/right), vertical blink spikes, jaw EMG bursts (broadband high-frequency), plus baseline drift and 60 Hz noise. Expose a way to script gestures (e.g. keyboard or a timed sequence) and a `degrade(signal, factor)` knob.
 - **Arduino source:** `arduino/relay_exg.ino` samples A0–A2 at a fixed rate (target 500 Hz) and prints `t_us,a0,a1,a2` at 115200 baud. Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG. Verify BioAmp EXG Pill output range and wiring against Upside Down Labs docs once hardware is in hand.
-- **Hardware we have:** one Arduino + the BioAmp EXG Pill kit. **No Muse.** Every real signal comes through the EXG pills.
+- **Hardware we have:** one Arduino + the BioAmp EXG Pill kit with **3 pills** (one per channel: A0 horizontal EOG, A1 vertical EOG/blinks, A2 jaw EMG). **No Muse.** Every real signal comes through the EXG pills.
 - **Filters:** EOG: low-pass ~10 Hz plus drift handling (use slope/derivative or high-pass ~0.1 Hz rather than absolute level). EMG: bandpass ~20–150 Hz (limited by sample rate), 60 Hz notch, RMS envelope.
 - **Detectors:** threshold-based with refractory periods. Output `confidence` from how far past threshold the feature is.
 - **Calibration:** guided prompts ("look left" ×10, "rest" 20 s, "clench" ×10…). Compute per-signal accuracy and false-trigger rate at rest. Thresholds adapt per user from calibration.
