@@ -1,7 +1,7 @@
 """Signal service entry point.
 
   python run.py --source synthetic                  # scripted gestures + keyboard
-  python run.py --source synthetic --script none    # keyboard only: type l/r/b/j/h + Enter
+  python run.py --source synthetic --script none    # keyboard only: type l/r/b/h + Enter
   python run.py --source synthetic --script quiet   # keyboard demo: script runs silently, so degrade still works
   python run.py --source synthetic --detectors real # synthetic waveforms through the real filters/detectors
   python run.py --source arduino --port /dev/tty.usbmodem1101
@@ -50,12 +50,12 @@ async def listen_controls(ws, source) -> None:
             source.degrade(msg["signal"], msg["factor"])
 
 
-KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double"}
+KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double", "h": "blink_hold"}
 
 
 def read_keyboard(source, loop: asyncio.AbstractEventLoop) -> None:
     """Terminal gesture triggers for the synthetic source (runs in a thread)."""
-    print("keys: l=look left  r=look right  b=double blink  + Enter")
+    print("keys: l=look left  r=look right  b=double blink  h=hold blink (HELP)  + Enter")
     for line in sys.stdin:
         for ch in line.strip().lower():
             if ch in KEYS:

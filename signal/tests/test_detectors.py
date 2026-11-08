@@ -16,7 +16,7 @@ def run(gestures: list[str], gap_s: float = 3.5, seed: int = 0, gain: dict | Non
     for g in gestures:
         exg.trigger(g, delay_s=t)
         t += gap_s
-    rows = exg.chunk(int(FS * (t + 1.5)))
+    rows = exg.chunk(int(FS * (t + 3.0)))
     p = Pipeline()
     events = []
     for i in range(0, len(rows), chunk):  # stream it the way the live source does
@@ -28,7 +28,7 @@ def names(events: list) -> list[str]:
     return [e.gesture if isinstance(e, Detection) else f"miss:{e.source}" for e in events]
 
 
-ALL = ["look_left", "look_right", "blink_double", "look_right", "look_left", "blink_double"]
+ALL = ["look_left", "look_right", "blink_double", "look_up", "look_right", "look_left"]
 
 
 def test_every_gesture_detected_once_in_order() -> None:
@@ -53,6 +53,17 @@ def test_look_and_return_does_not_fire_the_opposite_direction() -> None:
     assert names(run(["look_left"] * 4, gap_s=2.0)) == ["look_left"] * 4
 
 
+def test_help_hold_emits_blink_hold_once() -> None:
+    events = run(["blink_hold"])
+    assert names(events) == ["blink_hold"]
+    hold = events[0]
+    assert 1000 + 2000 <= hold.ts <= 1000 + 2600
+
+
+def test_short_blink_is_never_help() -> None:
+    assert names(run(["blink_double"] * 3)) == ["blink_double"] * 3
+
+
 def test_single_blink_is_ignored() -> None:
     det = BlinkDetector()
     t = np.arange(2 * FS) * 2000
@@ -74,11 +85,3 @@ def test_hardware_gain_knob_degrades_like_a_weak_signal() -> None:
     p = Pipeline()
     p.set_gain("eye", 0.3)
     assert names(p.process(rows)) == ["miss:eog_h"]
-
-
-def test_a2_is_ignored() -> None:
-    # Whatever is (or isn't) plugged into A2 must never produce a gesture.
-    exg = SyntheticEXG(seed=3)
-    rows = exg.chunk(30 * FS)
-    rows[:, 3] = 512 + 400 * np.sin(np.arange(len(rows)) / 5.0)
-    assert Pipeline().process(rows) == []

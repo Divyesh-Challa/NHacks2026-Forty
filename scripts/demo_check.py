@@ -140,16 +140,15 @@ async def main(base: str) -> None:
                 cmd = await patient.wait_for(lambda e: e["type"] == "command", 3, mark)
                 assert cmd["command"] == "SELECT", cmd
                 await caregiver.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "scan", 3)
-                return f"remapped to scan, double blink = SELECT. Banner: “{change['reason']}”"
+                return f"remapped to scan, blink = SELECT. Banner: “{change['reason']}”"
 
             async def step3() -> str:
                 mark = len(caregiver.events)
-                # HELP is a wheel slot confirmed with SELECT; the patient screen then sends the alert.
-                await pat_ws.send(json.dumps({"type": "alert", "message": "HELP", "ts": now()}))
+                await signal.gesture("blink", "blink_hold")
                 await caregiver.wait_for(lambda e: e["type"] == "alert" and e["message"] == "HELP", 3, mark)
                 history = (await http.get(f"/patients/{PATIENT}/messages", headers={"Authorization": f"Bearer {token}"})).json()
                 assert any(m["type"] == "alert" for m in history), "alert not in history"
-                return "HELP slot → HELP alert on caregiver + saved to history"
+                return "held blink → HELP alert on caregiver + saved to history"
 
             async def recover() -> str:
                 mark = len(patient.events)
@@ -158,7 +157,7 @@ async def main(base: str) -> None:
                 return f"restored → wheel. “{change['reason']}”"
 
             await step("1. Select a phrase with eye movement", step1())
-            await step("2. Eyes decline → double-blink scan mode", step2())
+            await step("2. Eyes decline → blink scan mode", step2())
             await step("3. HELP reaches the caregiver", step3())
             await step("   Restore (reset for the next run)", recover())
 

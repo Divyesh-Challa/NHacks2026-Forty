@@ -1,4 +1,4 @@
-"""Live plot of the three EXG channels — for electrode placement and threshold tuning.
+"""Live plot of the two EXG differential channels — for electrode placement and threshold tuning.
 
   python -m tools.plot_live                                   # synthetic
   python -m tools.plot_live --source serial --port /dev/tty.usbmodem1101
@@ -6,7 +6,7 @@
   python -m tools.plot_live --filtered    # what the detectors see: filtered level, threshold
                                           # (solid) and near-miss floor (dashed), live detections
 
-Synthetic keys (click the plot window first): l/r look, b blink, j clench, h hold, d degrade eyes, u restore.
+Synthetic keys (click the plot window first): l/r look, b blink, h held blink, d degrade eyes, u restore.
 """
 
 import argparse
@@ -21,9 +21,9 @@ from detectors import Detection, Pipeline
 from tools.streams import FS, SyntheticStream, open_stream
 
 WINDOW_S = 5
-LABELS = ["A0 · horizontal EOG", "A1 · vertical EOG / blink"]
-FILTERED_LABELS = ["A0 · EOG level (−left / +right)", "A1 · blink (red) / look up-down (blue)"]
-KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double"}
+LABELS = ["A0 · left − upper-right", "A1 · left − lower-right"]
+FILTERED_LABELS = ["Horizontal (average) / blink", "Vertical (difference)"]
+KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double", "h": "blink_hold"}
 
 
 def main() -> None:
@@ -51,7 +51,7 @@ def main() -> None:
         lines.append(line)
     if pipeline:
         d = pipeline.detectors
-        for ax, det, signs in ((axes[0], d["eog_h"], (-1, 1)), (axes[1], d["blink"], (1,))):
+        for ax, det, signs in ((axes[0], d["eog_h"], (-1, 1)), (axes[1], d["eog_v"], (-1, 1))):
             for sgn in signs:
                 ax.axhline(sgn * det.threshold, color="tab:red", lw=1)
                 ax.axhline(sgn * det.floor, color="tab:red", lw=1, ls="--")
@@ -62,7 +62,7 @@ def main() -> None:
     status = fig.text(0.01, 0.01, "", fontsize=9)
 
     if isinstance(stream, SyntheticStream):
-        status.set_text("keys: l/r look · b blink · d degrade eyes · u restore")
+        status.set_text("keys: l/r look · b blink · h held blink · d degrade eyes · u restore")
 
         def on_key(event) -> None:
             if event.key in KEYS:
@@ -96,8 +96,8 @@ def main() -> None:
             line.set_ydata(y)
             lo, hi = y.min(), y.max()
             if pipeline:  # keep the threshold lines in view
-                det = list(pipeline.detectors.values())[ch]
-                thr = max(det.threshold, pipeline.vert.threshold) if ch == 1 else det.threshold
+                det = (pipeline.detectors["eog_h"], pipeline.detectors["eog_v"])[ch]
+                thr = det.threshold
                 lo, hi = min(lo, -thr), max(hi, thr)
             pad = max(10.0, (hi - lo) * 0.1)
             ax.set_ylim(lo - pad, hi + pad)

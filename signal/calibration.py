@@ -39,8 +39,9 @@ SIGNAL_GESTURES = {
     "eog_h": ["look_left", "look_right"],
     "eog_v": ["look_down", "look_up"],  # only scored if the recording has these prompts (hardware sessions)
     "blink": ["blink_double"],
+    "blink": ["blink_double"],
 }
-MATCH_SLACK_US = 800_000  # a detection up to this long after the window still counts 
+MATCH_SLACK_US = 800_000  # allow detector/filter settling after a prompt
 REST_SKIP_US = 1_000_000  # ignore the first second of rest after a prompt (eyes returning, late release)
 
 
@@ -77,7 +78,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
             d = v[w] - np.median(v[p])
             vert[label].append(float(d[np.argmax(np.abs(d))]))
         elif label == "blink_double" and p.stop > p.start:
-            blink.append(float(np.max(v[w] - np.median(v[p]))))
+            blink.append(float(np.max(h[w] - np.median(h[p]))))
 
     rest_h, rest_v, rest_va = [], [], []
     for label, a, b in segs:
@@ -98,7 +99,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     vert_amps = [abs(x) for x in vert["look_down"] + ups]
     pct = lambda xs, q: float(np.percentile(xs, q)) if xs else 0.0  # noqa: E731
     return {
-        "eog_invert": False,
+        "eog_invert": invert,
         "vert_invert": vert_invert,
         "amplitude": {
             "eog_h": float(np.median(eog_amps)) if eog_amps else None,
@@ -107,7 +108,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
         },
         # Rest blinks are real blinks, so blink noise uses the median chunk, not the tail.
         # Rest blinks hit A1 too, so vertical noise is the median chunk like blink; a look must also outlast a blink.
-        "noise": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_v, 50)},
+        "noise": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_h, 50)},
     }
 
 
@@ -182,8 +183,8 @@ def load_csv(path: str | Path) -> tuple[np.ndarray, list[str]]:
         r = csv.reader(f)
         next(r)
         for line in r:
-            rows.append([int(x) for x in line[:4]])
-            labels.append(line[4] if len(line) > 4 else "rest")
+            rows.append([int(x) for x in line[:3]])
+            labels.append(line[3] if len(line) > 3 else "rest")
     return np.array(rows, dtype=np.int64), labels
 
 
@@ -228,7 +229,7 @@ def report(result: dict) -> str:
     lines.append(
         f"thresholds: eog {s['eog_threshold']} (floor {s['eog_floor']}, invert={s['eog_invert']}), "
         f"look up/down {s['vert_threshold']} (floor {s['vert_floor']}, invert={s['vert_invert']}), "
-        f"blink {s['blink_threshold']} (floor {s['blink_floor']})"
+        f"blink {s['blink_threshold']}"
     )
     return "\n".join(lines)
 

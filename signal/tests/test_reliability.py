@@ -12,10 +12,10 @@ def test_formula() -> None:
 
 def test_seed_sets_starting_reliability() -> None:
     t = tracker()
-    t.seed("brow", accuracy=0.75, false_trigger_rate=0.1)
-    assert t.accuracy("brow") == 6 / 8
-    assert t.false_trigger_rate("brow") == 2 / 20
-    assert abs(t.score("brow") - 0.75 * 0.9) < 1e-9
+    t.seed("eog_v", accuracy=0.75, false_trigger_rate=0.1)
+    assert t.accuracy("eog_v") == 6 / 8
+    assert t.false_trigger_rate("eog_v") == 2 / 20
+    assert abs(t.score("eog_v") - 0.75 * 0.9) < 1e-9
 
 
 def test_unseeded_signal_uses_defaults() -> None:
@@ -45,12 +45,12 @@ def test_false_triggers_lower_reliability() -> None:
 
 def test_usage_error_counts_as_a_miss() -> None:
     t = tracker()
-    t.seed("brow", 1.0, 0.0)
-    t.record_error("brow")
-    assert t.accuracy("brow") == 7 / 8
+    t.seed("eog_v", 1.0, 0.0)
+    t.record_error("eog_v")
+    assert t.accuracy("eog_v") == 7 / 8
 
 
 def test_snapshot_is_rounded_and_selectable() -> None:
     t = tracker()
-    t.seed("brow", 0.5, 0.0)
-    assert t.snapshot(["brow"]) == {"brow": 0.5}
+    t.seed("eog_v", 0.5, 0.0)
+    assert t.snapshot(["eog_v"]) == {"eog_v": 0.5}

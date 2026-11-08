@@ -2,10 +2,10 @@
 
 Two layers:
 
-1. SyntheticEXG — raw samples in the exact format the Arduino prints (t_us, a0, a1, a2 as 10-bit
-   ADC counts; A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused), with ground-truth
-   labels. Baseline drift, 60 Hz pickup and white noise are always on; gestures add EOG steps
-   and blink spikes (with a little crosstalk onto the other channel).
+1. SyntheticEXG — raw samples in the exact format the Arduino prints (t_us, a0, a1 as 10-bit
+   ADC counts; two shared-electrode differential readings), with ground-truth labels. Baseline
+   drift, 60 Hz pickup and white noise are always on; gestures add horizontal steps, vertical
+   differences and common-mode blink spikes.
    Use it to test filters/detectors, drive the live plotter, or record labelled CSVs.
 
 2. SyntheticSource.events() — the stream run.py sends to the backend. Until the real detectors
@@ -14,8 +14,8 @@ Two layers:
    signals false-trigger more at rest. Every outcome feeds ReliabilityTracker, so reliability
    falls because gestures are actually being missed, not because a number was set.
 
-degrade(signal, factor) scales the gesture amplitude for that signal ("eog_h", "blink";
-"eye" = eog_h + eog_v) while the noise stays the same: a fading signal, not a quieter channel.
+degrade(signal, factor) scales the gesture amplitude for that signal ("eog_h", "eog_v", "blink";
+"eye" = eog_h + blink) while the noise stays the same: a fading signal, not a quieter channel.
 """
 
 import asyncio
@@ -30,20 +30,23 @@ import messages
 from config import SIGNAL, SYNTHETIC
 from reliability import ReliabilityTracker
 
-CHANNELS = ("eog_h", "eog_v", "unused")  # A0, A1, A2 (A2 is still printed by the Arduino, nothing uses it)
-SIGNAL_CHANNEL = {"eog_h": 0, "eog_v": 1, "blink": 1}
+CHANNELS = ("eog_h", "eog_v")  # reconstructed horizontal and vertical signals
+SIGNAL_CHANNEL = {"eog_h": 0, "eog_v": 1, "blink": 0}
 GESTURE_SIGNAL = {
     "look_left": "eog_h",
     "look_right": "eog_h",
+    "look_up": "eog_v",
+    "look_down": "eog_v",
     "blink_double": "blink",
+    "blink_hold": "blink",
 }
-GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "blink_double": 0.65}
-DEMO_SIGNALS = ["eog_h", "blink"]
-DEFAULT_SCRIPT = ["look_left", "blink_double", "look_right", "blink_double", "look_left", "look_right"]
+GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "look_up": 1.0, "look_down": 1.0, "blink_double": 0.65, "blink_hold": 2.5}
+DEMO_SIGNALS = ["eog_h", "eog_v", "blink"]
+DEFAULT_SCRIPT = ["look_left", "blink_double", "look_right", "look_up", "blink_double", "look_left", "look_right"]
 
 
 def degrade_targets(signal: str) -> list[str]:
-    return ["eog_h", "eog_v"] if signal == "eye" else [signal]  # "eye" = the looks; blinking stays strong
+    return ["eog_h", "eog_v", "blink"] if signal == "eye" else [signal]
 
 
 @dataclass
@@ -80,16 +83,16 @@ class SyntheticEXG:
         return label
 
     def chunk(self, n: int) -> np.ndarray:
-        """n rows of (t_us, a0, a1, a2) as int64, same as the Arduino CSV."""
+        """n rows of (t_us, a0, a1) as int64, same as the Arduino CSV."""
         idx = np.arange(self.n, self.n + n)
         t = idx / self.fs
         c = self.cfg
-        x = np.zeros((3, n))
+        x = np.zeros((2, n))
         # Always-on background: slow drift (different per channel), 60 Hz pickup, white noise.
-        for ch in range(3):
+        for ch in range(2):
             x[ch] += c["drift"] * np.sin(2 * math.pi * 0.05 * t + self._drift_phase[ch])
         x += c["mains"] * np.sin(2 * math.pi * 60.0 * t)
-        x += self.rng.normal(0, c["noise"], size=(3, n))
+        x += self.rng.normal(0, c["noise"], size=(2, n))
 
         t_us = np.round(t * 1e6).astype(np.int64)
         for lab in self.labels:
@@ -104,20 +107,30 @@ class SyntheticEXG:
 
     def _gesture(self, gesture: str, dt: np.ndarray) -> np.ndarray:
         """Contribution of one gesture at times dt (s since onset; outside [0, dur] → 0)."""
-        c, out = self.cfg, np.zeros((3, dt.size))
+        c, out = self.cfg, np.zeros((2, dt.size))
         dur = GESTURE_SECONDS[gesture]
         inside = (dt >= 0) & (dt <= dur)
         if gesture in ("look_left", "look_right"):
             ramp = 0.05
             shape = np.clip(np.minimum(dt, dur - dt) / ramp, 0, 1)  # trapezoid step
             sign = -1 if gesture == "look_left" else 1
-            out[0] = sign * c["saccade"] * self.gain["eog_h"] * shape
-        elif gesture == "blink_double":
-            for onset in (0.0, 0.35):
+            contribution = sign * c["saccade"] * self.gain["eog_h"] * shape
+            out[0] = contribution
+            out[1] = contribution
+        elif gesture in ("look_up", "look_down"):
+            shape = np.clip(np.minimum(dt, dur - dt) / 0.05, 0, 1)
+            sign = 1 if gesture == "look_up" else -1
+            contribution = sign * c["saccade"] * self.gain["eog_v"] * shape
+            out[0] = -contribution
+            out[1] = contribution
+        elif gesture in ("blink_double", "blink_hold"):
+            onsets = (0.0, 0.35) if gesture == "blink_double" else (0.0,)
+            for onset in onsets:
                 d = dt - onset
-                spike = np.where((d >= 0) & (d <= 0.25), np.sin(math.pi * np.clip(d, 0, 0.25) / 0.25), 0)
+                duration = 0.25 if gesture == "blink_double" else dur
+                spike = np.where((d >= 0) & (d <= duration), np.sin(math.pi * np.clip(d, 0, duration) / duration), 0)
+                out[0] += c["blink"] * self.gain["blink"] * spike
                 out[1] += c["blink"] * self.gain["blink"] * spike
-                out[0] += 0.1 * c["blink"] * self.gain["blink"] * spike  # crosstalk
         return out * inside
 
 
@@ -197,7 +210,7 @@ class SyntheticSource:
             fired = self.detector.false_triggers(gain)
             self.tracker.record_rest(signal, fired)
             if fired:
-                gesture = {"eog_h": "look_right", "blink": "blink_double"}[signal]
+                gesture = {"eog_h": "look_right", "eog_v": "look_up", "blink": "blink_double"}[signal]
                 events.append(messages.gesture(signal, gesture, self.detector.confidence(gain) * 0.8))
         return events
 

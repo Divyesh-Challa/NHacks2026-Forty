@@ -1,7 +1,7 @@
 """Raw-sample streams shared by the plotter and recorder: synthetic, serial (Arduino), or CSV replay.
 
-Each stream's read() returns the rows that arrived since the last call as an (n, 4) int array of
-t_us, a0, a1, a2 — the Arduino's format.
+Each stream's read() returns the rows that arrived since the last call as an (n, 3) int array of
+t_us, a0, a1 — the Arduino's format.
 """
 
 import threading
@@ -24,7 +24,7 @@ class SyntheticStream:
 
     def read(self) -> np.ndarray:
         due = int((time.monotonic() - self.start) * FS) - self.exg.n
-        return self.exg.chunk(due) if due > 0 else np.empty((0, 4), dtype=np.int64)
+        return self.exg.chunk(due) if due > 0 else np.empty((0, 3), dtype=np.int64)
 
 
 class SerialStream:
@@ -32,7 +32,7 @@ class SerialStream:
         import serial  # pyserial
 
         self.ser = serial.Serial(port, baud, timeout=0.1)
-        self.buf: deque[tuple[int, int, int, int]] = deque()
+        self.buf: deque[tuple[int, int, int]] = deque()
         self.lock = threading.Lock()
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -46,14 +46,14 @@ class SerialStream:
     def read(self) -> np.ndarray:
         with self.lock:
             rows, self.buf = list(self.buf), deque()
-        return np.array(rows, dtype=np.int64).reshape(-1, 4)
+        return np.array(rows, dtype=np.int64).reshape(-1, 3)
 
 
 class CsvStream:
-    """Replays a recorded CSV (t_us,a0,a1,a2[,label]) in real time."""
+    """Replays a recorded CSV (t_us,a0,a1[,label]) in real time."""
 
     def __init__(self, path: str) -> None:
-        self.rows = np.loadtxt(path, delimiter=",", skiprows=1, usecols=(0, 1, 2, 3), dtype=np.int64)
+        self.rows = np.loadtxt(path, delimiter=",", skiprows=1, usecols=(0, 1, 2), dtype=np.int64)
         self.i = 0
         self.start = time.monotonic()
 

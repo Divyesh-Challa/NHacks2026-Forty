@@ -4,11 +4,14 @@ All filters are streaming: they keep their state (scipy `zi`) between calls, so 
 recording in one go or in 20 ms chunks gives the same output. That's what lets the live source,
 the plotter and offline tests share one code path.
 
-- EOG (A0 horizontal, A1 vertical/blink): 4th-order Butterworth low-pass at ~10 Hz. Eye movements
-  and blinks live below that; muscle crosstalk and 60 Hz pickup don't. Drift is NOT removed here:
+- Shared-electrode EOG (A0/A1): each differential channel uses a 4th-order Butterworth low-pass
+  at ~10 Hz before the pipeline reconstructs horizontal and vertical movement. Eye movements and
+  blinks live below that; 60 Hz pickup does not. Drift is NOT removed here:
   a 0.1 Hz high-pass turns "look left, hold, look back" into a left step followed by a fake right
   overshoot. Detectors instead subtract a slow baseline that freezes during a movement
   (see detectors.Baseline).
+- The shared electrode geometry provides common-mode blink information while the channel difference
+  suppresses blink artifacts in the vertical movement signal.
 """
 
 import numpy as np

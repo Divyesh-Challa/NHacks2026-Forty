@@ -35,13 +35,7 @@ def feed(im: InputManager, n: int, **signals: float) -> list[ModeChangeEvent]:
 
 
 def gesture(im: InputManager, g: str, ts: int = 0) -> list[str]:
-    source = {
-        "look_left": "eog_h",
-        "look_right": "eog_h",
-        "look_up": "eog_v",
-        "look_down": "eog_v",
-        "blink_double": "blink",
-    }.get(g, "brow")
+    source = {"look_left": "eog_h", "look_right": "eog_h", "look_up": "eog_v", "look_down": "eog_v", "blink_double": "blink", "blink_hold": "blink"}[g]
     return [c.command.value for c in im.on_gesture(GestureEvent(source=source, gesture=g, confidence=0.9, ts=ts))]
 
 
@@ -64,7 +58,8 @@ def test_wheel_mapping_when_all_signals_reliable() -> None:
     assert primary(im) == LOOK
     m = im.current_mapping()
     assert m["SELECT"] == "blink_double"
-    assert "ACCEPT" not in m and "HELP" not in m  # no gesture for either
+    assert "ACCEPT" not in m
+    assert m["HELP"] == "blink_hold"
     assert "BACK" not in m  # going back is looking at the kept slot
 
 
@@ -73,15 +68,30 @@ def test_wheel_needs_vertical_eye_movement_too() -> None:
     assert im.mode == "scan"
 
 
-def test_wheel_needs_a_finish_gesture() -> None:
-    im = make(eog_h=0.9, eog_v=0.9, blink=0.3)
-    assert im.mode == "scan"
-
-
-def test_scan_when_eyes_unreliable() -> None:
+def test_no_blink_fallback() -> None:
     im = make(eog_h=0.3, blink=0.9)
     assert im.mode == "scan"
-    assert im.current_mapping() == {"SELECT": "blink_double"}
+    assert im.current_mapping()["SELECT"] == "blink_double"
+
+
+def test_wheel_finishes_with_blink() -> None:
+    im = make(eog_h=0.9, blink=0.9)
+    assert im.mode == "wheel"
+    assert im.current_mapping()["SELECT"] == "blink_double"
+    assert "ACCEPT" not in im.current_mapping()
+
+
+def test_scan_mode_when_one_reliable_gesture() -> None:
+    im = make(eog_h=0.3, blink=0.9)
+    assert im.mode == "scan"
+    assert im.current_mapping()["SELECT"] == "blink_double"
+    assert "LEFT" not in im.current_mapping()
+
+
+def test_scan_picks_most_reliable_gesture() -> None:
+    im = make(eog_h=0.3, blink=0.7)
+    assert im.mode == "scan"
+    assert im.current_mapping()["SELECT"] == "blink_double"
 
 
 def test_snapshot_matches_contract() -> None:
@@ -114,11 +124,19 @@ def test_single_good_reading_resets_decline_count() -> None:
     assert primary(im) == LOOK
 
 
-def test_losing_the_finish_gesture_switches_to_scan() -> None:
+def test_losing_eye_channels_switches_to_blink_scan() -> None:
+    im = make(eog_h=0.9, blink=0.9)
+    changes = feed(im, 10, eog_h=0.3, blink=0.3)
+    assert im.mode == "scan"
+    assert im.current_mapping()["SELECT"] == "blink_double"
+    assert changes[-1].from_ == "wheel" and changes[-1].to == "scan"
+    assert "blink" in changes[-1].reason
+
+
+def test_finish_signal_decline_announces_scan_switch() -> None:
     im = make(eog_h=0.9, blink=0.9)
     changes = feed(im, 10, eog_h=0.9, blink=0.3)
-    assert im.mode == "scan"
-    assert changes[-1].from_ == "wheel" and changes[-1].to == "scan"
+    assert changes and im.mode == "scan"
 
 
 # --- hysteresis ---
@@ -165,7 +183,7 @@ def test_gestures_from_remapped_signal_are_ignored() -> None:
     assert gesture(im, "blink_double", ts=2000) == ["SELECT"]
 
 
-def test_scan_mode_double_blink_is_select() -> None:
+def test_scan_mode_blink_is_select() -> None:
     im = make(eog_h=0.3, blink=0.9)
     assert gesture(im, "blink_double") == ["SELECT"]
     assert gesture(im, "look_left", ts=1000) == []
@@ -184,6 +202,20 @@ def test_debounce_is_per_command() -> None:
     im = make(eog_h=0.9, blink=0.9)
     assert gesture(im, "look_left", ts=0) == ["LEFT"]
     assert gesture(im, "look_right", ts=100) == ["RIGHT"]
+
+
+# --- HELP ---
+
+def test_help_requires_hold_to_confirm() -> None:
+    """A double blink never raises HELP; only blink_hold does."""
+    im = make(eog_h=0.9, blink=0.9)
+    assert "HELP" not in gesture(im, "blink_double")
+    assert gesture(im, "blink_hold", ts=1000) == ["HELP"]
+
+
+def test_help_available_in_scan_mode() -> None:
+    im = make(eog_h=0.3, blink=0.9)
+    assert gesture(im, "blink_hold") == ["HELP"]
 
 
 # --- manual override (keyboard sim M key) ---

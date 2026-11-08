@@ -6,7 +6,7 @@ Mirrors backend/app/models.py (GestureEvent, SignalReliabilityEvent) — keep in
 import time
 
 SOURCES = {"eog_h", "eog_v", "blink", "brow", "sim"}
-GESTURES = {"look_left", "look_right", "look_up", "look_down", "blink_double", "brow_raise"}
+GESTURES = {"look_left", "look_right", "look_up", "look_down", "blink_double", "blink_hold", "brow_raise"}
 
 
 def now_ms() -> int:

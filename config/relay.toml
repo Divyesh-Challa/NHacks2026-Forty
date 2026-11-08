@@ -32,17 +32,16 @@ default_false_trigger_rate = 0.05
 eog_threshold = 80.0
 eog_floor = 40.0
 eog_invert = false            # flip if look_left reads positive on A0 (calibration detects this)
-eog_confirm_ms = 60           # must stay past threshold this long (rejects spikes)
-eog_rearm_ms = 1500           # after a look, ignore the opposite direction this long (return-to-centre overshoot)
+eog_confirm_ms = 500          # blink artifacts are short; a look must be sustained
+eog_max_ms = 1400              # longer common-mode excursions are held blinks, not looks
 blink_threshold = 110.0
 blink_floor = 40.0
 blink_max_ms = 400            # longer vertical excursions are looks, not blinks
 double_blink_ms = 700         # two blinks within this = blink_double
-vert_threshold = 100.0        # A1 look up/down (held, so it outlasts a blink)
-vert_floor = 50.0
-vert_invert = false           # flip if look_up reads negative on A1 (calibration detects this)
-vert_pair_ms = 350            # a blink's deep trough / second spike follows within this; a look's doesn't
-vert_rearm_ms = 2500          # rebound after a vertical look arrives 1.8-2.3 s later (measured), so longer than eog_rearm_ms
+vert_threshold = 200.0        # reconstructed A0-A1 look up/down
+vert_floor = 100.0
+vert_invert = false           # flip if look_up reads negative (calibration detects this)
+vert_confirm_ms = 450          # must exceed blink_max_ms, or every blink would read as a look
 max_excursion_s = 5.0         # a "movement" longer than this re-baselines (electrode shift)
 
 [synthetic]
@@ -50,8 +49,8 @@ adc_mid = 512                # 10-bit ADC centre, same units the Arduino prints
 noise = 4.0                  # white noise (ADC counts, std)
 mains = 6.0                  # 60 Hz pickup amplitude
 drift = 25.0                 # slow baseline wander amplitude
-saccade = 160.0              # look left/right step on A0
-blink = 220.0                # blink spike on A1
+saccade = 160.0              # horizontal contribution to both differential channels
+blink = 220.0                # common-mode blink contribution
 
 [predict]
 timeout_s = 2.0

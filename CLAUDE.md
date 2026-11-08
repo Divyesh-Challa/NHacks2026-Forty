@@ -13,7 +13,7 @@ You are helping a student team build **Relay** at natHacks 2026 (Standard Divisi
 
 ## What Relay is
 
-A communication system for people with ALS that keeps working as their abilities decline. It reads several body signals (eye movement, double blinks, eyebrow raise), measures how reliably the person can control each one, and maps controls to the most reliable signals. When one signal fades (e.g., eye control weakens), Relay automatically switches to another (e.g., double blink) without changing the board the person uses.
+A communication system for people with ALS that keeps working as their abilities decline. It reads eye movement and blinks through two EXG pills, measures how reliably the person can control them, and maps controls to the most reliable signals. When eye control fades, Relay automatically switches to blink scan mode without changing the board the person uses.
 
 **Differentiation (why this isn't just another eye-gaze app):**
 1. **Adapts as the disease progresses** — automatic, reliability-based remapping across multiple signals. This is the core feature. Protect it above everything else.
@@ -25,7 +25,7 @@ Competitors for reference: Tobii Dynavox (camera eye tracking, ~$5–10k), Googl
 ## The demo we're building toward (5-minute pitch)
 
 1. A teammate wears electrodes and selects "I need water" by looking left/right; accepts a predicted phrase; Relay speaks it aloud.
-2. We simulate declining eye control (a demo toggle lowers the eye channel's gain). Relay detects falling reliability, shows a banner, switches to scan mode with double blink as `SELECT`, and the teammate finishes the next message by double-blinking.
+2. We simulate declining eye control (a demo toggle lowers the eye channel's gain). Relay detects falling reliability, shows a banner, switches to scan mode with blink as `SELECT`, and the teammate finishes the next message with a blink.
 3. Teammate triggers HELP; a caregiver phone (browser) alerts with sound and notification.
 
 Everything you build should serve this sequence working reliably on stage.
@@ -58,11 +58,11 @@ relay/
   CLAUDE.md
   README.md
   .env.example
-  arduino/relay_exg/relay_exg.ino       # reads A0–A2, prints CSV over serial
+  arduino/relay_exg/relay_exg.ino       # reads A0/A1, prints CSV over serial
   signal/                               # signal service (Python)
     run.py                              # entry: pick source, stream gestures to backend
     sources/arduino_serial.py
-    sources/synthetic.py                # fake EOG/blink generator (use tonight)
+    sources/synthetic.py                # fake shared-electrode EOG/blink generator
     filters.py
     detectors.py
     calibration.py
@@ -113,13 +113,13 @@ The UI never sees raw signals. It only receives **eight commands** (radial wheel
 {"type": "gesture", "source": "eog_h", "gesture": "look_left", "confidence": 0.88, "ts": 1762490000000}
 {"type": "reliability", "signals": {"eog_h": 0.92, "eog_v": 0.85, "blink": 0.88}, "ts": 1762490000000}
 ```
-Sources: `eog_h`, `eog_v`, `blink`, `brow`, `sim`. (Jaw clench was dropped by team decision; A2 is unused.)
-Gestures: `look_left`, `look_right`, `look_up`, `look_down`, `blink_double`, `brow_raise`.
+Sources: `eog_h`, `eog_v`, `blink`, `brow`, `sim`.
+Gestures: `look_left`, `look_right`, `look_up`, `look_down`, `blink_double`, `blink_hold`, `brow_raise`.
 
 **Backend → frontend** (`/ws/patient/{id}` and `/ws/caregiver/{id}`):
 ```json
 {"type": "command", "command": "SELECT", "via": "blink", "confidence": 0.91, "ts": 1762490000000}
-{"type": "reliability", "signals": {"eog_h": 0.42, "blink": 0.95}, "mode": "scan", "mapping": {"SELECT": "blink_double"}}
+{"type": "reliability", "signals": {"eog_h": 0.42, "eog_v": 0.40, "blink": 0.80}, "mode": "scan", "mapping": {"SELECT": "blink_double", "HELP": "blink_hold"}}
 {"type": "mode_change", "from": "wheel", "to": "scan", "reason": "eye movement reliability below 60%"}
 {"type": "alert", "level": "urgent", "patient_id": "p1", "message": "HELP", "ts": 1762490000000}
 {"type": "spoken", "patient_id": "p1", "text": "I need water", "ts": 1762490000000}
@@ -145,22 +145,22 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 | `POST /predict` | `{patient_id, recent_messages, time_of_day, present}` → `{phrases: [..3–5]}` |
 | `POST /calibration` | Store per-signal accuracy + false-trigger rate |
 | `GET /patients/{id}/messages` | Message + alert history |
-| `POST /demo/degrade` | Demo only: scale a signal's gain/reliability down (e.g. `{"signal": "eog_h", "factor": 0.3}`). `"signal": "eye"` degrades `eog_h` + `eog_v` together and leaves blinking alone (stage demo: eye wheel → double-blink scan in one call) |
+| `POST /demo/degrade` | Demo only: scale a signal's gain/reliability down (e.g. `{"signal": "eog_h", "factor": 0.3}`). `"signal": "eye"` degrades `eog_h` + `eog_v` + `blink` together (stage demo: eye wheel → blink scan in one call) |
 
 ## Component specs
 
 ### Signal service
-- **Synthetic source (build first):** generates realistic-ish waveforms at 250–500 Hz: EOG horizontal steps (look left/right), vertical blink spikes, plus baseline drift and 60 Hz noise. Expose a way to script gestures (e.g. keyboard or a timed sequence) and a `degrade(signal, factor)` knob.
-- **Arduino source:** `arduino/relay_exg.ino` samples A0–A2 at a fixed rate (target 500 Hz) and prints `t_us,a0,a1,a2` at 250000 baud. Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused. Verify BioAmp EXG Pill output range and wiring against Upside Down Labs docs once hardware is in hand.
-- **Hardware we have:** one Arduino + the BioAmp EXG Pill kit with **3 pills** (A0 horizontal EOG, A1 vertical EOG/blinks; A2 unused). **No Muse.** Every real signal comes through the EXG pills.
-- **Filters:** EOG: low-pass ~10 Hz plus drift handling (use slope/derivative or high-pass ~0.1 Hz rather than absolute level).
+- **Synthetic source (build first):** generates shared-electrode differential waveforms at 250–500 Hz: horizontal steps, vertical differences, common-mode blink spikes, baseline drift and 60 Hz noise. Expose a way to script gestures and a `degrade(signal, factor)` knob.
+- **Arduino source:** `arduino/relay_exg/relay_exg.ino` samples A0/A1 at a fixed rate (target 500 Hz) and prints `t_us,a0,a1` at 250000 baud. A0 is the left-minus-upper-right reading; A1 is left-minus-lower-right. The pipeline reconstructs horizontal as their average and vertical as their difference.
+- **Hardware we have:** one Arduino + two BioAmp EXG pills. Three electrodes are used: one left of the left eye/brow and a pair above/below the right eye.
+- **Filters:** EOG: low-pass ~10 Hz plus drift handling (use slope/derivative or high-pass ~0.1 Hz rather than absolute level). EMG: bandpass ~20–150 Hz (limited by sample rate), 60 Hz notch, RMS envelope.
 - **Detectors:** threshold-based with refractory periods. Output `confidence` from how far past threshold the feature is.
 - **Calibration:** guided prompts ("look left" ×10, "rest" 20 s, "double blink" ×10…). Compute per-signal accuracy and false-trigger rate at rest. Thresholds adapt per user from calibration.
 - **Reliability (live):** `r = accuracy × (1 − false_trigger_rate)` over a rolling window. Seed from calibration; update from usage (e.g., a `BACK` right after a selection counts as a likely error).
 
 ### Input manager (the differentiator — make this solid and tested)
 - Rank signals by reliability. Choose mode: wheel if horizontal and vertical eye movement (`eog_h`, `eog_v`) and a finish gesture all have `r ≥ 0.6`, else scan.
-- Wheel mapping: the four looks → `LEFT/RIGHT/UP/DOWN`; first healthy of `blink_double`, `brow_raise` → `SELECT`. `ACCEPT` and `HELP` have no gesture: HELP is a slot on the wheel (Yes / No → right) that is read back and confirmed with `SELECT`; ACCEPT comes only from the keyboard/mouse simulators. No `BACK` gesture (looking at the kept slot goes back). Scan mode: best single gesture → `SELECT`.
+- Wheel mapping: the four looks → `LEFT/RIGHT/UP/DOWN`; `blink_double` → `SELECT`; `blink_hold` → `HELP`. No `BACK` gesture (looking at the kept slot goes back). Scan mode: blink → `SELECT`.
 - **Remap rule:** a mapped signal below 0.6 for its last 10 attempts triggers remap + `mode_change` event with a human-readable reason.
 - **Hysteresis:** switch back only if the signal stays ≥ 0.75 for 20 attempts. No flapping.
 - HELP requires hold-to-confirm. Debounce all commands (ignore duplicates within ~300 ms).
@@ -182,7 +182,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 - Phrase predictions are paused on the patient screen (backend `/predict` still works) until the setup flow is decided.
 - TTS via the browser Web Speech API: the real voice only for confirmed sentences; a quieter, faster audio aid (with a tone) for read-outs and read-back.
 - Keyboard simulator in `keyboardSim.ts`: arrows = UP/DOWN/LEFT/RIGHT, B = ACCEPT, Space = SELECT, Backspace = BACK, H (hold) = HELP, M = toggle wheel/scan, F = mouse-flick simulator, A = audio aid. Must work with no hardware.
-- Mode banner on `mode_change`: e.g. "Eye movement is getting harder to read. Switching to double blink."
+- Mode banner on `mode_change`: e.g. "Eye movement is getting harder to read. Switching to blink scan."
 
 ### Caregiver frontend
 - Mobile-friendly. Login → live alert feed (sound + browser Notification on HELP), message history, phrase board editor (changes push live to patient), per-signal reliability chart over time.

@@ -18,16 +18,14 @@ Prefer the Arduino IDE? Open `arduino/relay_exg/relay_exg.ino`, pick board **Ard
 
 ## 2. Wiring (two pills: eyes only)
 
-| Pill | Arduino pin | Signal | Electrodes |
+| Pill | Arduino pin | Differential reading | Electrodes |
 | --- | --- | --- | --- |
-| 1 | `A0` | horizontal EOG (look left/right) | outer corner of each eye |
-| 2 | `A1` | vertical EOG (look up/down) | above and below one eye |
+| 1 | `A0` | left electrode − upper-right electrode | left of the left eye/brow; above the right eye |
+| 2 | `A1` | left electrode − lower-right electrode | left of the left eye/brow; below the right eye |
 
-Every pill: VCC → 5V, GND → GND, OUT → its pin. Both share one ground. Reference electrode goes behind the ear (bony spot) or on the forehead. **Run the laptop on battery while recording**: a charger adds a lot of 60 Hz noise.
+Every pill: VCC → 5V, GND → GND, OUT → its pin. Both share the left electrode and ground. The signal service reconstructs horizontal movement as `(A0 + A1) / 2` and vertical movement as `A0 - A1`; common blink artifacts are rejected from horizontal tracking by the sustained-look detector. **Run the laptop on battery while recording**: a charger adds a lot of 60 Hz noise.
 
-`A2` is **unused** (jaw clench was dropped from the project). The firmware still prints a third value, which will be floating noise; the signal service ignores it.
-
-> **Status: up/down is not detected yet.** The firmware and wiring above are ready, but `signal/detectors.py` only reads A1 as a *blink* detector and has no `look_up` / `look_down` detector (and `CLAUDE.md` assigns A1 to blinks). Until a vertical EOG detector is added, A1 will show up/down in the plotter but will not produce gestures in the app. Pill gain/filter settings also differ for EOG and EMG; check the Upside Down Labs docs for your pills.
+There is no jaw channel in this setup. A held blink (about 2 seconds) is the HELP gesture.
 
 ## 3. Find the port
 
@@ -91,7 +89,7 @@ From `signal/`, in this order (stop each before starting the next):
 .venv/bin/python run.py --source arduino --port $PORT                         # stream gestures to the backend
 ```
 
-Looking left/right should show a step on A0 and looking up/down a step on A1 (a blink shows as a spike on A1). Ignore A2. If left reads upward instead of downward, calibration detects it and sets `eog_invert` in `config/relay.toml`.
+Looking left/right should move both raw channels in the same direction. Looking up/down should move A0 and A1 in opposite directions; a blink should appear similarly on both channels. Calibration derives the thresholds and polarity from these reconstructed signals.
 
 ## 7. Changing the firmware settings
 
@@ -101,15 +99,14 @@ The sketch and the Python side must agree:
 | --- | --- | --- |
 | Sample rate | `SAMPLE_RATE_HZ` | `sample_rate_hz` in `config/relay.toml` (filters read it; a mismatch silently breaks every filter) |
 | Baud | `Serial.begin(...)` | `baud` defaults in `signal/tools/streams.py` and `signal/sources/arduino_serial.py` |
-| Pin to signal mapping | the `analogRead(A0/A1/A2)` lines | none, as long as the output order stays horizontal, vertical, unused |
-| A 4th channel | another `analogRead` and print | needs code changes: `parse_line` in `arduino_serial.py` accepts exactly 4 fields |
+| Pin to signal mapping | the `analogRead(A0/A1)` lines | none, as long as output order stays shared-upper, shared-lower |
 
 Rules of thumb:
 - Keep the rate at about **500 Hz**: the detectors and calibration are tuned for it.
 - Pick a baud that divides the Uno's 16 MHz clock: **250000** (current), 500000 or 1000000. 230400 is about 3.5% off and garbles lines.
 - Lines are up to 26 bytes, so you need baud of at least rate × 26 × 10. At 500 Hz that is 130 kbaud, which is why 115200 is not enough.
 
-Output format, one line per sample: `t_us,a0,a1,a2`, where `t_us` is `micros()` at the moment of sampling (wraps every 71.6 min; resolution 4 µs on a 16 MHz Uno).
+Output format, one line per sample: `t_us,a0,a1`, where `t_us` is `micros()` at the moment of sampling (wraps every 71.6 min; resolution 4 µs on a 16 MHz Uno).
 
 ## 8. Other sketches in `arduino/`
 

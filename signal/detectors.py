@@ -9,12 +9,11 @@ Each detector consumes filtered samples (see filters.py) and returns Detection /
   shrink below threshold but stay above the floor, and reliability falls for a real reason.
 
 Detectors:
-- EogDetector (A0): look_left / look_right. level = (x − baseline). The baseline follows slow
+- EogDetector (reconstructed horizontal): look_left / look_right. level = (x − baseline). The baseline follows slow
   drift but freezes while |level| > floor, so returning the eyes to centre brings level back to ~0
   instead of firing the opposite direction. Must stay past threshold `eog_confirm_ms` (no spikes).
-- BlinkDetector (A1): a blink is a short (< blink_max_ms) positive excursion past threshold; two
-  within double_blink_ms = blink_double. Single blinks are ignored — people blink all the time.
-- VerticalEogDetector (A1): look_up / look_down from the shape of a short pulse pair.
+- BlinkDetector (shared-mode signal): a blink is a short positive excursion past threshold; two
+  within double_blink_ms = blink_double. A sustained excursion emits blink_hold for HELP.
 
 `gain` on each detector is the demo degrade knob for real hardware: it scales the signal so
 gestures land below threshold, exactly as a weakening muscle would.
@@ -93,11 +92,8 @@ class EogDetector(_Excursion):
         super().__init__(fs, settings[f"{p}_threshold"], settings[f"{p}_floor"])
         self.polarity = -1.0 if settings[f"{p}_invert"] else 1.0
         self.confirm_us = settings[f"{p}_confirm_ms"] * 1000
-        self.min_miss_us = 0  # excursions shorter than this are not reported as near-misses
-        # The pill is AC-coupled: a held look fades, so coming back to centre overshoots to the other
-        # side by the faded amount and reads as a look the other way. Ignore that for rearm_ms.
-        self.rearm_us = settings.get(f"{p}_rearm_ms", 0) * 1000
-        self.rearm_until, self.rearm_sign = 0, 0
+        self.max_eye_us = settings.get(f"{p}_max_ms", 1400) * 1000
+        self.min_miss_us = settings["blink_max_ms"] * 1000
         self.emitted = False
         self.above_since: int | None = None
 
@@ -118,14 +114,15 @@ class EogDetector(_Excursion):
                 if m > self.threshold:
                     self.above_since = ti if self.above_since is None else self.above_since
                     if ti - self.above_since >= self.confirm_us:
-                        gesture = self.names[0] if self.sign < 0 else self.names[1]
-                        out.append(Detection(self.source, gesture, confidence(self.peak, self.threshold), int(ti // 1000)))
                         self.emitted = True
                 else:
                     self.above_since = None
             if m < self.floor / 2:  # eyes back at centre
                 if not self.emitted and ti - self.start >= self.min_miss_us:
                     out.append(NearMiss(self.source, self.peak, int(ti // 1000)))
+                elif self.emitted and ti - self.start <= self.max_eye_us:
+                    gesture = self.names[0] if self.sign < 0 else self.names[1]
+                    out.append(Detection(self.source, gesture, confidence(self.peak, self.threshold), int(ti // 1000)))
                 self.active = False
                 self.ready_at = ti + (self.refractory_us if self.emitted else 0)
                 if self.emitted:
@@ -215,6 +212,8 @@ class BlinkDetector(_Excursion):
 
     def __init__(self, fs: float = FS, settings: dict = DETECTORS) -> None:
         super().__init__(fs, settings["blink_threshold"], settings["blink_floor"])
+        self.hold_us = HELP_HOLD_MS * 1000
+        self.hold_threshold = 1.5 * self.threshold
         self.blink_max_us = settings["blink_max_ms"] * 1000
         self.pair_us = settings["double_blink_ms"] * 1000
         self.last_blink: tuple[int, float] | None = None  # (start ts, peak)
@@ -239,7 +238,11 @@ class BlinkDetector(_Excursion):
         return out
 
     def _ended(self, ti: int) -> list[Event]:
+        if self.peak >= self.hold_threshold and ti - self.start >= self.hold_us:
+            self.ready_at = ti + self.refractory_us
+            return [Detection(self.source, "blink_hold", confidence(self.peak, self.threshold), int(ti // 1000))]
         if ti - self.start > self.blink_max_us:
+            self.last_blink = None
             return []  # a vertical look, not a blink
         if self.peak < self.threshold:
             # Both halves of a weak double blink are one near-miss, not two.
@@ -257,7 +260,7 @@ class BlinkDetector(_Excursion):
 
 
 class Pipeline:
-    """Raw Arduino rows (t_us, a0, a1, a2) in, gesture events out. Streaming. A2 is ignored."""
+    """Raw Arduino rows (t_us, a0, a1) in, gesture events out. Streaming."""
 
     def __init__(self, fs: float = FS, settings: dict | None = None) -> None:
         s = {**DETECTORS, **(settings or {})}
@@ -274,15 +277,16 @@ class Pipeline:
                 self.detectors[s].gain = factor
 
     def features(self, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Filtered traces (EOG-H, EOG-V) — for plotting and calibration."""
-        rows = np.asarray(rows).reshape(-1, 4)
-        return tuple(f(rows[:, i + 1].astype(float)) for i, f in enumerate(self.filters))
+        """Reconstruct filtered horizontal and vertical signals from the shared-electrode pair."""
+        rows = np.asarray(rows).reshape(-1, 3)
+        upper, lower = (f(rows[:, i + 1].astype(float)) for i, f in enumerate(self.filters))
+        return (0.5 * (upper + lower), lower - upper)
 
     def process(self, rows: np.ndarray) -> list[Event]:
-        rows = np.asarray(rows).reshape(-1, 4)
+        rows = np.asarray(rows).reshape(-1, 3)
         if rows.size == 0:
             return []
         h, v = self.last_features = self.features(rows)
         t = rows[:, 0]
-        events = self.eog.process(h, t) + self.blink.process(v, t) + self.vert.process(v, t)
+        events = self.eog.process(h, t) + self.blink.process(h, t) + self.vert.process(v, t)
         return sorted(events, key=lambda e: e.ts)

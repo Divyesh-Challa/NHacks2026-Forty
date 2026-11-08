@@ -14,6 +14,6 @@ def test_reliability_formula() -> None:
 def test_parse_line_handles_garbage() -> None:
     from sources.arduino_serial import parse_line
 
-    assert parse_line(b"1000,512,500,530\r\n") == (1000, 512, 500, 530)
+    assert parse_line(b"1000,512,500\r\n") == (1000, 512, 500)
     assert parse_line("12,5") is None
     assert parse_line(b"\xff\xfe1,2,3,x") is None

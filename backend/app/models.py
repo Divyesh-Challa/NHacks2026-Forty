@@ -35,6 +35,7 @@ class Gesture(str, Enum):
     look_up = "look_up"
     look_down = "look_down"
     blink_double = "blink_double"
+    blink_hold = "blink_hold"
     brow_raise = "brow_raise"
 
 
@@ -130,7 +131,7 @@ class CalibrationRequest(BaseModel):
 
 
 class DegradeRequest(BaseModel):
-    signal: Literal["eog_h", "eog_v", "blink", "brow", "eye"]  # "eye" = eog_h + eog_v (the looks)
+    signal: Literal["eog_h", "eog_v", "blink", "brow", "eye"]
     factor: float
 
 

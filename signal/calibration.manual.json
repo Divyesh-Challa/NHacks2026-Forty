@@ -4,14 +4,12 @@
     "eog_threshold": 200.0,
     "eog_floor": 120.0,
     "eog_invert": false,
-    "eog_confirm_ms": 60,
+    "eog_confirm_ms": 500,
+    "eog_max_ms": 1400,
     "blink_threshold": 208.46,
     "blink_floor": 104.23,
     "blink_max_ms": 400,
     "double_blink_ms": 700,
-    "jaw_threshold": 20.0,
-    "jaw_floor": 8.0,
-    "jaw_min_ms": 100,
     "max_excursion_s": 5.0
   },
   "signals": {
@@ -32,15 +30,6 @@
       "rest_seconds": 58,
       "amplitude": 416.9,
       "noise": 12.0
-    },
-    "jaw": {
-      "accuracy": 0.0,
-      "false_trigger_rate": 0.0,
-      "reliability": 0.0,
-      "attempts": 12,
-      "rest_seconds": 58,
-      "amplitude": 0.0,
-      "noise": 0.0
     }
   }
 }

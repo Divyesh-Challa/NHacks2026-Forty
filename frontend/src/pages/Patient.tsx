@@ -27,6 +27,7 @@ const GESTURE_LABELS: Record<string, string> = {
   look_up: 'look up',
   look_down: 'look down',
   blink_double: 'double blink',
+  blink_hold: 'hold eyes closed 2 s',
   brow_raise: 'raise eyebrows',
 }
 const LOOK_COMMANDS: Record<Dir, Command> = { up: 'UP', right: 'RIGHT', down: 'DOWN', left: 'LEFT' }

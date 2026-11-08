@@ -23,9 +23,3 @@ dist/
 # Signal: per-person calibration + recordings (not committed)
 signal/calibration.json
 signal/recordings/
-
-# Agent loop: local run log
-.claude/loop/
-.claude/worktrees/
-.claude/settings.local.json
-.superpowers/

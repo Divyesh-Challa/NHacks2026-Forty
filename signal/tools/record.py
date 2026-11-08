@@ -1,4 +1,4 @@
-"""Record a labelled session: prompts each gesture in turn and writes t_us,a0,a1,a2,label.
+"""Record a labelled session: prompts each gesture in turn and writes t_us,a0,a1,label.
 
   python -m tools.record --source serial --port /dev/tty.usbmodem1101 --reps 10
   python -m tools.record --source synthetic --reps 3          # dry run; performs the prompts itself
@@ -20,6 +20,7 @@ from tools.streams import SyntheticStream, open_stream
 GESTURES = ["look_left", "look_right", "blink_double"]
 VERTICAL = ["look_up", "look_down"]  # real hardware only: the synthetic generator has no vertical looks
 PROMPT_S = 2.0
+HOLD_PROMPT_S = 3.5  # blink_hold needs help_hold_ms (2 s) plus reaction time
 REST_S = 2.0
 OUT_DIR = Path(__file__).resolve().parents[1] / "recordings"
 INSTRUCTIONS = {
@@ -28,15 +29,16 @@ INSTRUCTIONS = {
     "look_up": "LOOK UP and hold for a second, then back to centre",
     "look_down": "LOOK DOWN and hold for a second, then back to centre",
     "blink_double": "DOUBLE BLINK",
+    "blink_hold": "HOLD your eyes closed until the next prompt",
 }
 
 
 def prompt_seconds(gesture: str) -> float:
-    return PROMPT_S
+    return HOLD_PROMPT_S if gesture == "blink_hold" else PROMPT_S
 
 
 def prompts_for(reps: int, rng=random, vertical: bool = False) -> list[str]:
-    prompts = (GESTURES + (VERTICAL if vertical else [])) * reps
+    prompts = (GESTURES + (VERTICAL if vertical else [])) * reps + ["blink_hold"] * max(2, reps // 4)
     rng.shuffle(prompts)
     return prompts
 
@@ -63,7 +65,7 @@ def record(stream, reps: int, rest: float = 20.0, out: Path | None = None, cues=
         stream.read()  # drop what arrived while getting ready
     with out.open("w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["t_us", "a0", "a1", "a2", "label"])
+        w.writerow(["t_us", "a0", "a1", "label"])
 
         def capture(seconds: float, label: str) -> None:
             end = time.monotonic() + seconds

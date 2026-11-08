@@ -1,6 +1,10 @@
-// Relay EXG reader. Owner: Role B.
-// Samples A0-A2 at a fixed rate and prints "t_us,a0,a1,a2" at 250000 baud.
-// Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused.
+// Relay EXG reader.
+// Samples the two EXG pills at a fixed rate and prints "t_us,a0,a1".
+// Wiring uses three electrodes:
+//   A0 = left-of-left-eye electrode minus upper-right-eye electrode
+//   A1 = left-of-left-eye electrode minus lower-right-eye electrode
+// Signal processing reconstructs horizontal movement from their average and
+// vertical movement from their difference.
 // TODO: verify BioAmp EXG Pill output range + wiring against Upside Down Labs docs.
 //       250000 baud (exact divisor of 16 MHz, 0% error): 26-byte worst-case lines x 500 Hz = 13 kB/s < 25 kB/s.
 //       115200 tops out near 440 lines/s and the loop falls behind.
@@ -22,13 +26,10 @@ void loop() {
 
   int a0 = analogRead(A0);
   int a1 = analogRead(A1);
-  int a2 = analogRead(A2);
 
   Serial.print(now);
   Serial.print(',');
   Serial.print(a0);
   Serial.print(',');
-  Serial.print(a1);
-  Serial.print(',');
-  Serial.println(a2);
+  Serial.println(a1);
 }

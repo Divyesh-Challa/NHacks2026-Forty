@@ -1,6 +1,6 @@
 # Relay
 
-A communication system for people with ALS that keeps working as their abilities decline. Relay reads several body signals (eye movement, double blinks, eyebrow raise), measures how reliably the person can control each one, and maps the controls to the most reliable signals. When one signal fades, Relay switches to another automatically, and the board the person uses stays the same.
+A communication system for people with ALS that keeps working as their abilities decline. Relay reads eye movement and blinks through two EXG pills, measures how reliably the person can control them, and maps controls to the most reliable signals. When one signal fades, Relay switches modes automatically, and the board the person uses stays the same.
 
 Built at natHacks 2026 (Healthcare & Accessibility). All data is synthetic.
 
@@ -34,7 +34,7 @@ make demo-check         # plays the 3 stage-demo steps end to end; run before th
 
 **Synthetic signals:** `make signal` streams scripted gestures. `make signal-keyboard` (`--script quiet`) runs the script silently: reliability still moves, so demo degrade still switches modes, but only the keyboard drives the wheel. With `--script none`, it waits for you to type `l`/`r`/`b`/`j`/`h` + Enter in its terminal. Add `--detectors real` to run synthetic *waveforms* through the real filters and detectors, the same code path as the Arduino. `cd signal && .venv/bin/python -m tools.plot_live` shows the raw channels live; add `--filtered` to see what the detectors see (filtered level, threshold, near-miss floor, live detections). Press `d` to degrade the eyes. `python -m tools.record` records labelled CSVs.
 
-**Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: arrows = look up/down/left/right (pick a wheel slot), Space = SELECT (finish, then confirm to speak), B = ACCEPT the centre suggestion, Backspace = BACK, hold H for 2 s = HELP, M = toggle wheel/scan, F = mouse-flick simulator (flick the cursor away from screen centre), A = audio aid on/off. Example: ↑ → ↑ → Space Space says "I want water." The patient page also works with the backend offline. For the full keyboard demo with mode switching, run `make backend`, `make signal-keyboard` and `make frontend`, then press "Degrade eyes → blink scan" on `/demo`; the wheel switches to scan and Space (standing in for a double blink) picks the highlight.
+**Without hardware:** open `http://localhost:5173/patient/p1` and use the keyboard: arrows = look up/down/left/right (pick a wheel slot), Space = SELECT (finish, then confirm to speak), B = ACCEPT the centre suggestion, Backspace = BACK, hold H for 2 s = HELP, M = toggle wheel/scan, F = mouse-flick simulator (flick the cursor away from screen centre), A = audio aid on/off. Example: ↑ → ↑ → Space Space says "I want water." The patient page also works with the backend offline. For the full keyboard demo with mode switching, run `make backend`, `make signal-keyboard` and `make frontend`, then press "Degrade eyes → blink scan" on `/demo`; the wheel switches to scan and Space picks the highlight.
 
 **With hardware:** flash `arduino/relay_exg/relay_exg.ino` and find the port with `ls /dev/tty.usb*`. Then:
 
@@ -52,11 +52,11 @@ Calibration prints the accuracy table we quote in the pitch and keeps a copy in 
 
 **Demo controls:** open `http://localhost:5173/demo` on a second laptop or phone (not the projector). It has buttons for "Degrade eyes → blink scan", "Degrade eye movement only" and "Restore all", plus live reliability bars, the current mode and mapping, and recent switches.
 
-**Demo degrade from the terminal (stage step 2):** this degrades both eye signals, so Relay switches from eye-movement wheel mode to double-blink scan mode after about 20 s:
+**Demo degrade from the terminal (stage step 2):** this degrades both eye signals, so Relay switches from eye-movement wheel mode to blink scan mode after about 20 s:
 
 ```bash
 curl -X POST localhost:8000/demo/degrade -H 'Content-Type: application/json' -d '{"signal":"eye","factor":0.3}'
-# restore: same call with "factor": 1.0.  Single signals also work: "eog_h", "eog_v", "blink"
+# restore: same call with "factor": 1.0. Single signals also work: "eog_h", "eog_v", "blink"
 ```
 
 The database is `backend/relay.db`, created and seeded with fake data on first start. Delete it to reset.
@@ -72,9 +72,9 @@ The database is `backend/relay.db`, created and seeded with fake data on first s
 
 - **Health per signal, not per reading.** Every reliability reading for a signal counts as one attempt. A healthy signal becomes unhealthy only after **10 consecutive readings below 0.6**. One bad second never takes away a control the person is using.
 - **Hysteresis.** An unhealthy signal is trusted again only after **20 consecutive readings ≥ 0.75**. The gap between 0.6 and 0.75 plus the longer recovery window keeps a signal hovering near the cutoff from flipping the board back and forth (tested in `test_no_flapping_around_cutoff`).
-- **Mode choice.** Wheel mode needs horizontal and vertical eye movement healthy (four looks → UP/DOWN/LEFT/RIGHT) plus a finish gesture: the first healthy of double blink → eyebrow raise is SELECT. ACCEPT has no gesture (keyboard B only). There's no BACK gesture; looking at the kept slot goes back. Otherwise scan mode uses the most reliable healthy gesture as SELECT.
-- **Announcements.** A `mode_change` with a plain-language reason (e.g. "Eye movement reliability fell below 60%. Switching to scan mode with double blink to select.") goes out only when the mode or a primary control changes. Losing an optional extra like ACCEPT changes nothing on screen.
-- **HELP** is a slot on the wheel (Yes / No, then right). Looking at it reads "Send HELP to your caregiver?" back; a double blink (`SELECT`) sends it and any look cancels, so a stray look or blink can't raise a false alarm. In scan mode HELP is also a scan item. Jaw clench was dropped from the project.
+- **Mode choice.** Wheel mode needs horizontal and vertical eye movement healthy (four looks → UP/DOWN/LEFT/RIGHT) plus double blink as SELECT. There's no BACK gesture; looking at the kept slot goes back. Otherwise scan mode uses the most reliable healthy eye gesture as SELECT.
+- **Announcements.** A `mode_change` with a plain-language reason (e.g. "Eye movement reliability fell below 60%. Switching to scan mode with blink to select.") goes out only when the mode or a primary control changes.
+- **HELP** is a sustained blink (`blink_hold`, ~2 s), confirmed in the detector, so an ordinary blink or double blink cannot raise a false alarm.
 - **Debounce.** A repeated command within 300 ms is dropped, per command.
 - The logic is pure Python with no I/O, so it's covered by unit tests.
 
@@ -82,16 +82,17 @@ The database is `backend/relay.db`, created and seeded with fake data on first s
 
 - `r = accuracy × (1 − false_trigger_rate)`. Accuracy is measured over the last **8 gesture attempts** per signal, and the false-trigger rate over the last **20 seconds of rest**. Both windows start filled from calibration, so a new session begins at the calibrated value and real use takes over.
 - The synthetic source runs a simulated detector: about 97% of gestures are detected at full strength, about 25% after `degrade(…, 0.3)`, and weaker signals false-trigger more at rest. Reliability on stage therefore falls because gestures are actually being missed.
-- Measured live, with the synthetic source at its default rate: "Degrade eyes" → double-blink scan mode in **~19 s**, and restore → eye control in **~23 s** (recovery is intentionally stricter).
+- Measured live, with the synthetic source at its default rate: "Degrade eyes" → blink scan mode in **~19 s**, and restore → eye control in **~23 s** (recovery is intentionally stricter).
 
-- **No ground truth on live hardware**, so live reliability uses **near-misses**: a movement clearly above the noise (past the detector's *floor*) that never reaches its *threshold* counts as a failed attempt. When eye control weakens, saccades shrink below threshold but stay above the floor, so reliability falls as the person keeps trying. The false-trigger rate keeps its calibrated value. With the real detectors on synthetic waveforms (`--detectors real`), degrading the eyes produces near-misses → eye movement fades → double-blink scan mode, and restoring brings eye control back.
+- **No ground truth on live hardware**, so live reliability uses **near-misses**: a movement clearly above the noise (past the detector's *floor*) that never reaches its *threshold* counts as a failed attempt. When eye control weakens, saccades shrink below threshold but stay above the floor, so reliability falls as the person keeps trying. The false-trigger rate keeps its calibrated value. With the real detectors on synthetic waveforms (`--detectors real`), degrading the eyes produces near-misses and remaps eye movement to blink scan mode, while restoring brings eye control back.
 
 ### Filters (`signal/filters.py`)
 
 All filters are streaming: they keep their state between 20 ms chunks, so live, plotted and offline results are identical (tested).
 
-- **EOG (A0, A1): 4th-order Butterworth low-pass at 10 Hz.** Eye movements and blinks are below 10 Hz, while muscle crosstalk and 60 Hz mains are far above it.
+- **Shared-electrode EOG (A0, A1):** both channels are low-passed at 10 Hz, then horizontal is reconstructed as `(A0 + A1) / 2` and vertical as `A0 - A1`. The shared-mode blink component is used for blink detection; horizontal looks require a sustained excursion to reject blink artifacts.
 - **Drift: an adaptive baseline, not a high-pass.** A 0.1 Hz high-pass turns "look left, hold, look back" into a left step followed by a fake *right* overshoot. Instead, each EOG detector subtracts a slow baseline (1 s time constant) that **freezes while the eyes are moving**, so returning to centre brings the level back to zero. If a "movement" lasts over 5 s, the detector re-baselines (the electrode probably shifted).
+- **Blink:** short common-mode excursions are paired into `blink_double`; a sustained common-mode excursion becomes `blink_hold` for HELP.
 
 ### Detectors (`signal/detectors.py`)
 

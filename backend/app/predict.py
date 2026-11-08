@@ -20,7 +20,7 @@ MIN_PHRASES, MAX_PHRASES = 3, 5
 MAX_PHRASE_CHARS = 60
 
 SYSTEM = """You suggest phrases for a person with ALS who communicates through an AAC board by \
-selecting items with eye movement and double blinks. Each selection is slow and tiring, so a good \
+selecting items with eye movement or blinking. Each selection is slow and tiring, so a good \
 suggestion saves them real effort.
 
 Suggest 3 to 5 short phrases they are likely to want to say next, written in the first person \
