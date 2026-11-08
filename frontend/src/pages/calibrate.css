@@ -100,3 +100,9 @@
     transform: scaleX(0);
   }
 }
+
+.cal .seen {
+  margin-top: 0.5rem;
+  font-weight: 600;
+  color: #7dd3a0;
+}

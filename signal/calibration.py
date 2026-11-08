@@ -122,6 +122,8 @@ def thresholds(m: dict) -> dict:
             continue
         thr = max(0.5 * amp, 2.0 * noise)
         s[f"{key}_threshold"] = round(thr, 2)
+        if key in ("eog", "vert", "blink"):
+            s[f"{key}_unit"] = round(amp, 2)  # size of one gesture; the zone tracker and blink-vs-look rule use these
         s[f"{key}_floor"] = round(min(max(0.25 * amp, 1.3 * noise), 0.8 * thr), 2)
     return s
 
@@ -129,7 +131,9 @@ def thresholds(m: dict) -> dict:
 def evaluate(rows: np.ndarray, labels: list[str], settings: dict, fs: float = FS) -> dict:
     """Run the real detectors with `settings` and score them against the prompts."""
     t = rows[:, 0]
-    detections = [e for e in Pipeline(fs, settings).process(rows) if isinstance(e, Detection)]
+    # The prompts are shuffled with no return to centre between them, so the live "opposite look is the
+    # return" rule must be off here or every direction change would be scored as a miss.
+    detections = [e for e in Pipeline(fs, {**settings, "look_return_hold_ms": 0}).process(rows) if isinstance(e, Detection)]
     segs = segments(t, labels)
     out = {}
     for sig, gestures in SIGNAL_GESTURES.items():

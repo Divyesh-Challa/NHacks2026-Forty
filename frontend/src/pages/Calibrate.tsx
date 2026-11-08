@@ -11,6 +11,7 @@ type Msg =
   | { type: 'intro'; seconds: number }
   | { type: 'cue'; gesture: string; seconds: number; hold_s: number; index: number; total: number; next: string | null }
   | { type: 'rest'; seconds: number; next: string | null }
+  | { type: 'seen'; text: string } // live test only: what Relay just detected
   | { type: 'done' }
 
 type Phase = 'offline' | 'idle' | 'run' | 'done'
@@ -65,6 +66,7 @@ export default function Calibrate() {
   const [seconds, setSeconds] = useState(0)
   const [tick, setTick] = useState(0) // restarts the countdown bar on every message
   const [muted, setMuted] = useState(false)
+  const [seen, setSeen] = useState('')
   const sock = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -88,6 +90,11 @@ export default function Calibrate() {
 
     const handle = (m: Msg) => {
       clearTimeout(back)
+      if (m.type === 'seen') {
+        setSeen(m.text)
+        return
+      }
+      if (m.type === 'cue' || m.type === 'rest') setSeen('')
       if (m.type === 'ready') {
         setPhase('run')
         show('Get ready', 'Look at the dot in the centre', m.seconds)
@@ -165,7 +172,7 @@ export default function Calibrate() {
           <>
             <h1>Not connected</h1>
             <p>
-              Run <code>make calibrate-cue PORT=/dev/cu.usbmodem1101</code>. This page connects by itself.
+              Run <code>make calibrate-cue PORT=/dev/cu.usbmodem101</code> (or the live test). This page connects by itself.
             </p>
           </>
         )}
@@ -182,6 +189,7 @@ export default function Calibrate() {
           <>
             <h1>{text}</h1>
             <p>{sub}</p>
+            {seen && <p className="seen">Detected: {seen}</p>}
           </>
         )}
         {phase === 'done' && (
