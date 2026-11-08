@@ -50,12 +50,12 @@ async def listen_controls(ws, source) -> None:
             source.degrade(msg["signal"], msg["factor"])
 
 
-KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double", "j": "jaw_clench", "h": "jaw_hold"}
+KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double"}
 
 
 def read_keyboard(source, loop: asyncio.AbstractEventLoop) -> None:
     """Terminal gesture triggers for the synthetic source (runs in a thread)."""
-    print("keys: l=look left  r=look right  b=double blink  j=jaw clench  h=jaw hold (HELP)  + Enter")
+    print("keys: l=look left  r=look right  b=double blink  + Enter")
     for line in sys.stdin:
         for ch in line.strip().lower():
             if ch in KEYS:

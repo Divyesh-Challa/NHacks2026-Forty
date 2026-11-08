@@ -14,6 +14,7 @@ export interface WheelNode {
   say?: string // full sentence for a leaf with no starter above it
   spell?: true // the Spell… slot
   learned?: true // a learned word placed in the centre
+  help?: true // the HELP slot: looking at it asks to send an alert (confirmed with SELECT)
   children?: Partial<Record<Dir, WheelNode>>
 }
 

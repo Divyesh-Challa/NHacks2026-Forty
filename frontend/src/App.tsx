@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import Calibrate from './pages/Calibrate'
 import Caregiver from './pages/Caregiver'
 import Demo from './pages/Demo'
 import Pair from './pages/Pair'
@@ -12,6 +13,7 @@ export default function App() {
         <Route path="/caregiver" element={<Caregiver />} />
         <Route path="/pair" element={<Pair />} />
         <Route path="/demo" element={<Demo />} />
+        <Route path="/calibrate" element={<Calibrate />} />
         <Route path="*" element={<Navigate to="/patient/p1" replace />} />
       </Routes>
     </BrowserRouter>

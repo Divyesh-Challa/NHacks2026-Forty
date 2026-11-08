@@ -39,7 +39,11 @@ test('a picked leaf can be unpicked or swapped', () => {
 })
 
 test('looking at an empty slot does nothing', () => {
-  assert.equal(go('left', 'right').length, 1)
+  assert.equal(go('right', 'down', 'left').length, 2) // Needs › People has nothing on the left
+})
+
+test('Yes / No has HELP on the right', () => {
+  assert.equal(go('left', 'right').at(-1)?.node.help, true)
 })
 
 test('sentences from templates', () => {

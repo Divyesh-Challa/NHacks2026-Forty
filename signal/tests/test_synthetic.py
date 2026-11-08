@@ -46,19 +46,10 @@ def test_blink_spikes_on_a1() -> None:
     assert window(rows, 0.5, 1.2)[:, 2].max() - window(rows, 0.0, 0.4)[:, 2].mean() > 150
 
 
-def test_jaw_clench_is_a_broadband_burst_on_a2() -> None:
-    exg = SyntheticEXG(seed=4)
-    exg.trigger("jaw_clench", delay_s=0.5)
-    rows = exg.chunk(FS * 2)
-    rest_std = window(rows, 0.0, 0.4)[:, 3].std()
-    burst_std = window(rows, 0.55, 0.85)[:, 3].std()
-    assert burst_std > 5 * rest_std
-
-
 def test_labels_are_ground_truth() -> None:
     exg = SyntheticEXG(seed=5)
-    lab = exg.trigger("jaw_hold", delay_s=1.0)
-    assert (lab.gesture, lab.start_us, lab.end_us) == ("jaw_hold", 1_000_000, 3_500_000)
+    lab = exg.trigger("look_left", delay_s=1.0)
+    assert (lab.gesture, lab.start_us, lab.end_us) == ("look_left", 1_000_000, 1_750_000)
 
 
 def test_degrade_shrinks_the_gesture_not_the_noise() -> None:
@@ -88,25 +79,25 @@ def test_degrade_makes_reliability_fall_below_cutoff_from_missed_gestures() -> N
     for _ in range(8):
         src.attempt("look_left")
         src.attempt("blink_double")
-    assert src.tracker.score("eog_h") < 0.6 and src.tracker.score("blink") < 0.6
-    assert src.tracker.score("jaw") > 0.75  # untouched signal stays healthy
+    assert src.tracker.score("eog_h") < 0.6
+    assert src.tracker.score("blink") > 0.75  # "eye" fades the looks only; blinking stays healthy
 
 
 def test_restore_recovers_reliability() -> None:
     src = SyntheticSource(seed=8)
-    src.degrade("jaw", 0.2)
+    src.degrade("blink", 0.2)
     for _ in range(8):
-        src.attempt("jaw_clench")
-    src.degrade("jaw", 1.0)
+        src.attempt("blink_double")
+    src.degrade("blink", 1.0)
     for _ in range(8):
-        src.attempt("jaw_clench")
-    assert src.tracker.score("jaw") > 0.75
+        src.attempt("blink_double")
+    assert src.tracker.score("blink") > 0.75
 
 
 def test_event_stream_sends_gestures_and_reliability() -> None:
     async def collect() -> list[dict]:
         src = SyntheticSource(interval_s=0.05, seed=9)
-        src.trigger("jaw_hold")  # keyboard-style trigger
+        src.trigger("blink_double")  # keyboard-style trigger
         out = []
         async for ev in src.events():
             out.append(ev)
@@ -116,15 +107,9 @@ def test_event_stream_sends_gestures_and_reliability() -> None:
 
     events = asyncio.run(asyncio.wait_for(collect(), 5))
     gestures = [e["gesture"] for e in events if e["type"] == "gesture"]
-    assert "jaw_hold" in gestures or len(gestures) > 3
+    assert "blink_double" in gestures or len(gestures) > 3
     rel = [e for e in events if e["type"] == "reliability"][-1]
-    assert set(rel["signals"]) == {"eog_h", "blink", "jaw"}
-
-
-def test_script_never_raises_help() -> None:
-    from sources.synthetic import DEFAULT_SCRIPT
-
-    assert "jaw_hold" not in DEFAULT_SCRIPT
+    assert set(rel["signals"]) == {"eog_h", "blink"}
 
 
 def test_quiet_stream_sends_only_keyboard_gestures_but_still_degrades() -> None:
@@ -133,7 +118,7 @@ def test_quiet_stream_sends_only_keyboard_gestures_but_still_degrades() -> None:
     async def collect() -> tuple[list[dict], SyntheticSource]:
         src = SyntheticSource(interval_s=0.02, seed=9, quiet=True)
         src.degrade("eog_h", 0.0)
-        src.trigger("jaw_hold")
+        src.trigger("blink_double")
         out = []
         async for ev in src.events():
             out.append(ev)
@@ -143,5 +128,5 @@ def test_quiet_stream_sends_only_keyboard_gestures_but_still_degrades() -> None:
 
     events, src = asyncio.run(asyncio.wait_for(collect(), 5))
     gestures = [e["gesture"] for e in events if e["type"] == "gesture"]
-    assert gestures == ["jaw_hold"]
+    assert gestures == ["blink_double"]
     assert src.tracker.score("eog_h") < 0.6

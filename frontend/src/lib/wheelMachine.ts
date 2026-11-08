@@ -9,7 +9,7 @@ import type { Dir, Pick, WheelNode, WheelView } from './wheel.ts'
 
 export type Phase = 'wheel' | 'readback' | 'spell'
 export interface Readback {
-  kind: 'sentence' | 'word'
+  kind: 'sentence' | 'word' | 'help'
   text: string
 }
 export interface MachineState {
@@ -75,8 +75,15 @@ function lookAt(s: MachineState, dir: Dir, ctx: Ctx): Result {
   }
   const path = look(ctx.root, s.path, dir)
   if (path === s.path) return [s, []]
+  if (path.at(-1)?.node.help && path.at(-1) !== s.path.at(-1)) return askHelp(s)
   const pickedLeaf = view(ctx.root, path).picked !== null && path.at(-1) !== s.path.at(-1)
   return [{ ...s, path, scanIndex: 0 }, [pickedLeaf ? aid(path.at(-1)!.node.word) : announceAt(path, ctx)]]
+}
+
+// The HELP slot never fires on its own: looking at it reads "Send HELP?" back, and SELECT confirms.
+function askHelp(s: MachineState): Result {
+  const text = 'Send HELP to your caregiver?'
+  return [{ ...s, phase: 'readback', readback: { kind: 'help', text }, scanIndex: READBACK_START }, [{ kind: 'aid', text, always: true }]]
 }
 
 function accept(s: MachineState, ctx: Ctx): Result {
@@ -98,6 +105,7 @@ function finish(s: MachineState): Result {
 
 function confirm(s: MachineState, ctx: Ctx): Result {
   const rb = s.readback!
+  if (rb.kind === 'help') return [INITIAL, [{ kind: 'help' }, { kind: 'aid', text: 'Help sent', always: true }]]
   const key = keyChain(s.path)[0] ?? ''
   if (rb.kind === 'sentence') {
     const fx: Effect[] = [{ kind: 'say', text: rb.text, path: s.path.map((p) => p.node.word) }]

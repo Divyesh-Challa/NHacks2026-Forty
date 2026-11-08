@@ -27,8 +27,6 @@ const GESTURE_LABELS: Record<string, string> = {
   look_up: 'look up',
   look_down: 'look down',
   blink_double: 'double blink',
-  jaw_clench: 'clench jaw',
-  jaw_hold: 'hold jaw 2 s',
   brow_raise: 'raise eyebrows',
 }
 const LOOK_COMMANDS: Record<Dir, Command> = { up: 'UP', right: 'RIGHT', down: 'DOWN', left: 'LEFT' }
@@ -244,7 +242,7 @@ export default function Patient() {
           </div>
           {mode === 'scan' ? (
             <div className="choices">
-              {['🔊 Speak', '✕ Cancel'].map((label, i) => (
+              {[machine.readback.kind === 'help' ? '🚨 Send HELP' : '🔊 Speak', '✕ Cancel'].map((label, i) => (
                 <div key={label} className={`item${machine.scanIndex === i ? ' active' : ''}`}>
                   {label}
                 </div>
@@ -252,7 +250,7 @@ export default function Patient() {
             </div>
           ) : (
             <div className="hint">
-              {machine.readback.kind === 'word' ? 'To save this word' : 'To speak'}: {GESTURE_LABELS[mapping.SELECT] ?? 'select'} · look to cancel
+              {machine.readback.kind === 'word' ? 'To save this word' : machine.readback.kind === 'help' ? 'To send HELP' : 'To speak'}: {GESTURE_LABELS[mapping.SELECT] ?? 'select'} · look to cancel
             </div>
           )}
         </div>

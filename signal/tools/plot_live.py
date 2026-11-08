@@ -21,9 +21,9 @@ from detectors import Detection, Pipeline
 from tools.streams import FS, SyntheticStream, open_stream
 
 WINDOW_S = 5
-LABELS = ["A0 · horizontal EOG", "A1 · vertical EOG / blink", "A2 · jaw EMG"]
-FILTERED_LABELS = ["A0 · EOG level (−left / +right)", "A1 · blink (red) / look up-down (blue)", "A2 · jaw envelope"]
-KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double", "j": "jaw_clench", "h": "jaw_hold"}
+LABELS = ["A0 · horizontal EOG", "A1 · vertical EOG / blink"]
+FILTERED_LABELS = ["A0 · EOG level (−left / +right)", "A1 · blink (red) / look up-down (blue)"]
+KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double"}
 
 
 def main() -> None:
@@ -37,11 +37,11 @@ def main() -> None:
     pipeline = Pipeline(settings=(load_calibration() or {}).get("settings")) if args.filtered else None
 
     n = WINDOW_S * FS
-    data = [deque([0 if pipeline else 512] * n, maxlen=n) for _ in range(3)]
+    data = [deque([0 if pipeline else 512] * n, maxlen=n) for _ in range(2)]
     recent: deque[str] = deque(maxlen=4)
     t = np.linspace(-WINDOW_S, 0, n)
 
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(10, 7))
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(10, 7))
     fig.canvas.manager.set_window_title("Relay — live EXG")
     lines = []
     for ax, label in zip(axes, FILTERED_LABELS if pipeline else LABELS):
@@ -51,7 +51,7 @@ def main() -> None:
         lines.append(line)
     if pipeline:
         d = pipeline.detectors
-        for ax, det, signs in ((axes[0], d["eog_h"], (-1, 1)), (axes[1], d["blink"], (1,)), (axes[2], d["jaw"], (1,))):
+        for ax, det, signs in ((axes[0], d["eog_h"], (-1, 1)), (axes[1], d["blink"], (1,))):
             for sgn in signs:
                 ax.axhline(sgn * det.threshold, color="tab:red", lw=1)
                 ax.axhline(sgn * det.floor, color="tab:red", lw=1, ls="--")
@@ -62,7 +62,7 @@ def main() -> None:
     status = fig.text(0.01, 0.01, "", fontsize=9)
 
     if isinstance(stream, SyntheticStream):
-        status.set_text("keys: l/r look · b blink · j clench · h hold · d degrade eyes · u restore")
+        status.set_text("keys: l/r look · b blink · d degrade eyes · u restore")
 
         def on_key(event) -> None:
             if event.key in KEYS:
@@ -71,7 +71,6 @@ def main() -> None:
                 stream.exg.degrade("eye", 0.3)  # gestures shrink below threshold → near-misses
             elif event.key == "u":
                 stream.exg.degrade("eye", 1.0)
-                stream.exg.degrade("jaw", 1.0)
 
         fig.canvas.mpl_connect("key_press_event", on_key)
 
@@ -81,17 +80,16 @@ def main() -> None:
             for ev in pipeline.process(rows):
                 recent.append(f"{ev.gesture} {ev.confidence:.2f}" if isinstance(ev, Detection) else f"near-miss {ev.source}")
                 status.set_text("   ·   ".join(recent))
-            h, v, env = pipeline.last_features
+            h, v = pipeline.last_features
             d = pipeline.detectors  # level = filtered − detector baseline, as the detector sees it
             traces = (
                 (h - d["eog_h"].base.value) * d["eog_h"].gain * d["eog_h"].polarity,
                 (v - d["blink"].base.value) * d["blink"].gain,
-                env * d["jaw"].gain,
             )
-            for ch in range(3):
+            for ch in range(2):
                 data[ch].extend(traces[ch].tolist())
         else:
-            for ch in range(3):
+            for ch in range(2):
                 data[ch].extend(rows[:, ch + 1].tolist())
         for ch, (ax, line) in enumerate(zip(axes, lines)):
             y = np.fromiter(data[ch], dtype=float, count=n)
@@ -100,7 +98,7 @@ def main() -> None:
             if pipeline:  # keep the threshold lines in view
                 det = list(pipeline.detectors.values())[ch]
                 thr = max(det.threshold, pipeline.vert.threshold) if ch == 1 else det.threshold
-                lo, hi = min(lo, -thr if ch <= 1 else 0), max(hi, thr)
+                lo, hi = min(lo, -thr), max(hi, thr)
             pad = max(10.0, (hi - lo) * 0.1)
             ax.set_ylim(lo - pad, hi + pad)
         return lines

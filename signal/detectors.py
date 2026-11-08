@@ -14,9 +14,7 @@ Detectors:
   instead of firing the opposite direction. Must stay past threshold `eog_confirm_ms` (no spikes).
 - BlinkDetector (A1): a blink is a short (< blink_max_ms) positive excursion past threshold; two
   within double_blink_ms = blink_double. Single blinks are ignored — people blink all the time.
-- JawDetector (A2 envelope): a burst past threshold for ≥ jaw_min_ms, reported on release as
-  jaw_clench. A burst still going after help_hold_ms is reported once, immediately, as jaw_hold —
-  and never also as jaw_clench (HELP contract, TASKS.md).
+- VerticalEogDetector (A1): look_up / look_down from the shape of a short pulse pair.
 
 `gain` on each detector is the demo degrade knob for real hardware: it scales the signal so
 gestures land below threshold, exactly as a weakening muscle would.
@@ -26,8 +24,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from config import DETECTORS, HELP_HOLD_MS, SIGNAL
-from filters import FS, EmgEnvelope, EogFilter
+from config import DETECTORS, SIGNAL
+from filters import FS, EogFilter
 
 
 @dataclass
@@ -138,20 +136,78 @@ class EogDetector(_Excursion):
         return out
 
 
-class VerticalEogDetector(EogDetector):
-    """A1 look up / look down: same excursion logic as A0, tuned by vert_* settings.
+class VerticalEogDetector:
+    """A1 look up / look down, told apart from blinks by pulse *shape*, not length.
 
-    A blink is also a vertical excursion on A1, so a look must outlast one: vert_confirm_ms is
-    set above blink_max_ms, and shorter excursions (blinks) are not counted as near-misses.
+    On the AC-coupled pill a look is a ~100-150 ms pulse, the same length as a blink (measured), so
+    a long hold can't be required. What differs: a blink is a positive spike followed within
+    vert_pair_ms by a deep negative trough (and usually a second spike); a look up is a positive
+    pulse with no such trough; a look down is a negative pulse with no positive spike just before it.
+    A look up is therefore reported vert_pair_ms after the pulse, once no trough or second spike came.
+    No near-misses are emitted (ponytail: eog_v reliability never falls; add them if it must remap).
     """
 
     source = "eog_v"
-    prefix = "vert"
-    names = ("look_down", "look_up")
 
     def __init__(self, fs: float = FS, settings: dict = DETECTORS) -> None:
-        super().__init__(fs, settings)
-        self.min_miss_us = settings["blink_max_ms"] * 1000
+        self.threshold, self.floor = settings["vert_threshold"], settings["vert_floor"]
+        self.polarity = -1.0 if settings["vert_invert"] else 1.0
+        self.pair_us = settings.get("vert_pair_ms", 350) * 1000
+        self.rearm_us = settings.get("vert_rearm_ms", 0) * 1000  # return-to-centre overshoot, as in EogDetector
+        self.refractory_us = SIGNAL["refractory_ms"] * 1000
+        self.max_us = DETECTORS["max_excursion_s"] * 1e6
+        self.gain = 1.0
+        self.base = Baseline(fs)
+        self.active = False
+        self.sign, self.peak, self.start = 0, 0.0, 0
+        self.last_pos_end = -(10**12)
+        self.pending: tuple[int, float] | None = None  # (end, peak) of a positive pulse not yet proven a look
+        self.ready_at = 0
+        self.rearm_until, self.rearm_sign = 0, 0
+
+    def process(self, x: np.ndarray, t_us: np.ndarray) -> list[Event]:
+        out: list[Event] = []
+        for xi, ti in zip(x, t_us):
+            if self.base.value is None:
+                self.base.update(xi)
+            lv = (xi - self.base.value) * self.gain * self.polarity
+            if self.pending and not self.active and ti - self.pending[0] >= self.pair_us:
+                out += self._emit("look_up", self.pending[1], ti)
+                self.pending = None
+            if not self.active:
+                self.base.update(xi)
+                if abs(lv) > self.floor:
+                    self.active, self.sign, self.peak, self.start = True, int(np.sign(lv)), abs(lv), ti
+                continue
+            self.peak = max(self.peak, lv * self.sign)
+            if lv * self.sign < self.floor / 2:
+                self.active = False
+                out += self._pulse(self.sign, self.peak, self.start, ti)
+            elif ti - self.start > self.max_us:  # stuck off-baseline: electrode moved; start over here
+                self.active = False
+                self.base.value = xi
+        return out
+
+    def _pulse(self, sign: int, peak: float, start: int, end: int) -> list[Event]:
+        if sign > 0:
+            second_spike = self.pending is not None and start - self.pending[0] <= self.pair_us
+            self.last_pos_end = end
+            self.pending = None if second_spike else ((end, peak) if peak >= self.threshold else None)
+            return []
+        if self.pending and start - self.pending[0] <= self.pair_us and peak >= 0.5 * self.pending[1]:
+            self.pending = None  # the trough after a blink spike
+            return []
+        if peak >= self.threshold and start - self.last_pos_end > self.pair_us:
+            return self._emit("look_down", peak, end)
+        return []
+
+    def _emit(self, gesture: str, peak: float, ts: int) -> list[Event]:
+        sign = 1 if gesture == "look_up" else -1
+        if ts < self.ready_at or (ts < self.rearm_until and sign == -self.rearm_sign):
+            return []
+        self.ready_at = ts + self.refractory_us
+        self.rearm_until, self.rearm_sign = ts + self.rearm_us, sign
+        return [Detection(self.source, gesture, confidence(peak, self.threshold), int(ts // 1000))]
 
 
 class BlinkDetector(_Excursion):
@@ -200,69 +256,25 @@ class BlinkDetector(_Excursion):
         return []
 
 
-class JawDetector:
-    source = "jaw"
-
-    def __init__(self, fs: float = FS, settings: dict = DETECTORS, hold_ms: float = HELP_HOLD_MS) -> None:
-        self.threshold, self.floor = settings["jaw_threshold"], settings["jaw_floor"]
-        self.min_us = settings["jaw_min_ms"] * 1000
-        self.hold_us = hold_ms * 1000
-        self.refractory_us = SIGNAL["refractory_ms"] * 1000
-        self.gain = 1.0
-        self.active = False
-        self.start = 0
-        self.crossed_at: int | None = None
-        self.held = False
-        self.peak = 0.0
-        self.ready_at = 0
-
-    def process(self, env: np.ndarray, t_us: np.ndarray) -> list[Event]:
-        out: list[Event] = []
-        for ei, ti in zip(env, t_us):
-            e = ei * self.gain
-            if not self.active:
-                if e > self.floor and ti >= self.ready_at:
-                    self.active, self.start, self.peak, self.crossed_at, self.held = True, ti, e, None, False
-                continue
-            self.peak = max(self.peak, e)
-            if e > self.threshold and self.crossed_at is None:
-                self.crossed_at = ti
-            if self.crossed_at is not None and not self.held and ti - self.crossed_at >= self.hold_us:
-                out.append(Detection(self.source, "jaw_hold", confidence(self.peak, self.threshold), int(ti // 1000)))
-                self.held = True
-            if e < 0.75 * self.floor:  # released (hysteresis: no chatter around the floor)
-                self.active = False
-                if self.held:
-                    self.ready_at = ti + self.refractory_us
-                elif self.crossed_at is not None and ti - self.crossed_at >= self.min_us:
-                    out.append(Detection(self.source, "jaw_clench", confidence(self.peak, self.threshold), int(ti // 1000)))
-                    self.ready_at = ti + self.refractory_us
-                elif self.crossed_at is None and ti - self.start >= self.min_us:
-                    out.append(NearMiss(self.source, self.peak, int(ti // 1000)))
-        return out
-
-
 class Pipeline:
-    """Raw Arduino rows (t_us, a0, a1, a2) in, gesture events out. Streaming."""
+    """Raw Arduino rows (t_us, a0, a1, a2) in, gesture events out. Streaming. A2 is ignored."""
 
     def __init__(self, fs: float = FS, settings: dict | None = None) -> None:
         s = {**DETECTORS, **(settings or {})}
-        self.filters = (EogFilter(fs), EogFilter(fs), EmgEnvelope(fs))
+        self.filters = (EogFilter(fs), EogFilter(fs))
         self.eog = EogDetector(fs, s)
         self.blink = BlinkDetector(fs, s)
-        self.jaw = JawDetector(fs, s)
         self.vert = VerticalEogDetector(fs, s)
-        # Keep eog_h/blink/jaw first: plot_live indexes this dict by channel.
-        self.detectors = {"eog_h": self.eog, "blink": self.blink, "jaw": self.jaw, "eog_v": self.vert}
-        self.last_features: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+        self.detectors = {"eog_h": self.eog, "blink": self.blink, "eog_v": self.vert}
+        self.last_features: tuple[np.ndarray, np.ndarray] | None = None
 
     def set_gain(self, signal: str, factor: float) -> None:
-        for s in ["eog_h", "eog_v", "blink"] if signal == "eye" else [signal]:
+        for s in ["eog_h", "eog_v"] if signal == "eye" else [signal]:
             if s in self.detectors:
                 self.detectors[s].gain = factor
 
-    def features(self, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Filtered traces (EOG-H, EOG-V, jaw envelope) — for plotting and calibration."""
+    def features(self, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Filtered traces (EOG-H, EOG-V) — for plotting and calibration."""
         rows = np.asarray(rows).reshape(-1, 4)
         return tuple(f(rows[:, i + 1].astype(float)) for i, f in enumerate(self.filters))
 
@@ -270,7 +282,7 @@ class Pipeline:
         rows = np.asarray(rows).reshape(-1, 4)
         if rows.size == 0:
             return []
-        h, v, env = self.last_features = self.features(rows)
+        h, v = self.last_features = self.features(rows)
         t = rows[:, 0]
-        events = self.eog.process(h, t) + self.blink.process(v, t) + self.jaw.process(env, t) + self.vert.process(v, t)
+        events = self.eog.process(h, t) + self.blink.process(v, t) + self.vert.process(v, t)
         return sorted(events, key=lambda e: e.ts)

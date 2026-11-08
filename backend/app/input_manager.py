@@ -4,18 +4,19 @@ Pure logic, no I/O — the hub (ws.py) feeds it events and broadcasts what it re
 Spec: CLAUDE.md "Input manager". Tests: tests/test_input_manager.py.
 
 How it decides:
-  - Each signal (eog_h, blink, jaw, ...) is healthy or unhealthy. A reliability reading for a
+  - Each signal (eog_h, eog_v, blink, ...) is healthy or unhealthy. A reliability reading for a
     signal counts as one attempt. The first reading seeds health (r >= cutoff).
   - healthy -> unhealthy: last `remap_window` readings all below `reliability_cutoff`.
   - unhealthy -> healthy: last `recover_window` readings all >= `recover_cutoff` (hysteresis).
   - Wheel mode (radial wheel, docs/superpowers/specs/2026-11-07-radial-wheel-design.md) if
     horizontal and vertical eye movement are both healthy and a finish gesture is: the four looks
-    pick slots, the first healthy WHEEL_FINISH gesture = SELECT, double blink = ACCEPT if still free.
+    pick slots and the first healthy WHEEL_FINISH gesture (double blink) = SELECT.
     There is no BACK gesture: looking at the kept slot again goes back.
     Otherwise scan mode with the most reliable healthy gesture as SELECT.
   - A mode_change is emitted when the mode or a primary control (looks/SELECT) changes.
-  - HELP = jaw_hold, which the detector only emits after a sustained (~help_hold_ms) clench,
-    so a short clench can never raise HELP. In scan mode HELP is also a scan item.
+  - HELP is not a gesture. The patient screen has a HELP slot (wheel) / item (scan) that is confirmed
+    with SELECT, then the screen sends the alert itself. ACCEPT (centre suggestion) has no gesture
+    either: double blink is the finish, so it only comes from the keyboard/mouse simulators.
 """
 
 from collections import deque
@@ -39,29 +40,24 @@ GESTURE_SOURCE: dict[str, str] = {
     "look_up": "eog_v",
     "look_down": "eog_v",
     "blink_double": "blink",
-    "jaw_clench": "jaw",
-    "jaw_hold": "jaw",
     "brow_raise": "brow",
 }
 
 # Wheel mode: the four looks pick slots.
 WHEEL_LOOKS = {"LEFT": "look_left", "RIGHT": "look_right", "UP": "look_up", "DOWN": "look_down"}
 # Wheel-mode SELECT (finish / confirm) in preference order; the first healthy one wins.
-WHEEL_FINISH = ["jaw_clench", "blink_double", "brow_raise"]
-ACCEPT_GESTURE = "blink_double"  # accept the centre suggestion, when not already SELECT
+WHEEL_FINISH = ["blink_double", "brow_raise"]
 # Scan-mode SELECT candidates; the most reliable healthy one wins.
-SCAN_SELECT = ["jaw_clench", "blink_double", "brow_raise", "look_right"]
-HELP_GESTURE = "jaw_hold"
+SCAN_SELECT = ["blink_double", "brow_raise", "look_right"]
 PRIMARY = ("LEFT", "RIGHT", "UP", "DOWN", "SELECT")
 
-# Sources wired on the 3-pill rig; assumed healthy until their first reading arrives.
-DEFAULT_SOURCES = ("eog_h", "eog_v", "blink", "jaw")
+# Sources wired on the 2-pill rig; assumed healthy until their first reading arrives.
+DEFAULT_SOURCES = ("eog_h", "eog_v", "blink")
 
 SOURCE_NAMES = {
     "eog_h": "eye movement",
     "eog_v": "vertical eye movement",
     "blink": "blinking",
-    "jaw": "jaw clench",
     "brow": "eyebrow raise",
 }
 GESTURE_NAMES = {
@@ -70,8 +66,6 @@ GESTURE_NAMES = {
     "look_up": "looking up",
     "look_down": "looking down",
     "blink_double": "double blink",
-    "jaw_clench": "jaw clench",
-    "jaw_hold": "jaw hold",
     "brow_raise": "eyebrow raise",
 }
 
@@ -172,22 +166,14 @@ class InputManager:
         finish = next((g for g in WHEEL_FINISH if self._ok(g)), None)
 
         if mode != "scan" and eyes and finish:
-            mapping = {**WHEEL_LOOKS, "SELECT": finish}
-            if self._ok(ACCEPT_GESTURE) and ACCEPT_GESTURE != finish:
-                mapping["ACCEPT"] = ACCEPT_GESTURE
-            if self._ok(HELP_GESTURE):
-                mapping["HELP"] = HELP_GESTURE
-            return "wheel", mapping
+            return "wheel", {**WHEEL_LOOKS, "SELECT": finish}
 
         if mode == "wheel":  # forced wheel without healthy eyes: fall back to the default mapping
-            return "wheel", {**WHEEL_LOOKS, "SELECT": "jaw_clench"}
+            return "wheel", {**WHEEL_LOOKS, "SELECT": WHEEL_FINISH[0]}
 
         candidates = [g for g in SCAN_SELECT if self._ok(g)] or SCAN_SELECT
         select = max(candidates, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
-        mapping = {"SELECT": select}
-        if self._ok(HELP_GESTURE):
-            mapping["HELP"] = HELP_GESTURE
-        return "scan", mapping
+        return "scan", {"SELECT": select}
 
     def _apply(self, reason) -> ModeChangeEvent | None:
         """Recompute mode/mapping; return a ModeChangeEvent if anything primary changed."""

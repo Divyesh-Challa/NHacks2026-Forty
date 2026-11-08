@@ -1,7 +1,7 @@
 """Arduino + BioAmp EXG Pill source.
 
 Reads `t_us,a0,a1,a2` lines at 250000 baud from arduino/relay_exg/relay_exg.ino.
-Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG.
+Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused.
 Samples go through sources/pipeline.py (filters → detectors → reliability), same as
 `run.py --source synthetic --detectors real`.
 """

@@ -1,6 +1,6 @@
 // Relay EXG reader. Owner: Role B.
 // Samples A0-A2 at a fixed rate and prints "t_us,a0,a1,a2" at 250000 baud.
-// Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG.
+// Channel map: A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused.
 // TODO: verify BioAmp EXG Pill output range + wiring against Upside Down Labs docs.
 //       250000 baud (exact divisor of 16 MHz, 0% error): 26-byte worst-case lines x 500 Hz = 13 kB/s < 25 kB/s.
 //       115200 tops out near 440 lines/s and the loop falls behind.

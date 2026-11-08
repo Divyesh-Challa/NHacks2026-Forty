@@ -25,7 +25,7 @@ Prefer the Arduino IDE? Open `arduino/relay_exg/relay_exg.ino`, pick board **Ard
 
 Every pill: VCC → 5V, GND → GND, OUT → its pin. Both share one ground. Reference electrode goes behind the ear (bony spot) or on the forehead. **Run the laptop on battery while recording**: a charger adds a lot of 60 Hz noise.
 
-`A2` (jaw) is **left unconnected**. The firmware still prints a third value, which will be floating noise: ignore it. A floating pin can trigger false `jaw_clench` events (untested); if it does, tie A2 to GND or leave a jaw pill attached.
+`A2` is **unused** (jaw clench was dropped from the project). The firmware still prints a third value, which will be floating noise; the signal service ignores it.
 
 > **Status: up/down is not detected yet.** The firmware and wiring above are ready, but `signal/detectors.py` only reads A1 as a *blink* detector and has no `look_up` / `look_down` detector (and `CLAUDE.md` assigns A1 to blinks). Until a vertical EOG detector is added, A1 will show up/down in the plotter but will not produce gestures in the app. Pill gain/filter settings also differ for EOG and EMG; check the Upside Down Labs docs for your pills.
 
@@ -101,11 +101,11 @@ The sketch and the Python side must agree:
 | --- | --- | --- |
 | Sample rate | `SAMPLE_RATE_HZ` | `sample_rate_hz` in `config/relay.toml` (filters read it; a mismatch silently breaks every filter) |
 | Baud | `Serial.begin(...)` | `baud` defaults in `signal/tools/streams.py` and `signal/sources/arduino_serial.py` |
-| Pin to signal mapping | the `analogRead(A0/A1/A2)` lines | none, as long as the output order stays horizontal, vertical, jaw |
+| Pin to signal mapping | the `analogRead(A0/A1/A2)` lines | none, as long as the output order stays horizontal, vertical, unused |
 | A 4th channel | another `analogRead` and print | needs code changes: `parse_line` in `arduino_serial.py` accepts exactly 4 fields |
 
 Rules of thumb:
-- Keep the rate at **300 Hz or above**: the jaw filter uses 20 to 150 Hz.
+- Keep the rate at about **500 Hz**: the detectors and calibration are tuned for it.
 - Pick a baud that divides the Uno's 16 MHz clock: **250000** (current), 500000 or 1000000. 230400 is about 3.5% off and garbles lines.
 - Lines are up to 26 bytes, so you need baud of at least rate × 26 × 10. At 500 Hz that is 130 kbaud, which is why 115200 is not enough.
 

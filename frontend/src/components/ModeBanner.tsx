@@ -1,5 +1,5 @@
 // Shown on mode_change with the backend's plain-language reason,
-// e.g. "Eye movement reliability fell below 60%. Switching to scan mode with jaw clench to select."
+// e.g. "Eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
 import { useEffect, useState } from 'react'
 import type { ModeChangeEvent } from '../lib/types'
 

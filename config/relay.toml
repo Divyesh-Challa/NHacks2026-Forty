@@ -8,9 +8,6 @@ recover_cutoff = 0.75        # must stay at/above this to switch back (hysteresi
 remap_window = 10            # attempts below cutoff before remapping
 recover_window = 20          # attempts above recover_cutoff before switching back
 debounce_ms = 300            # ignore duplicate commands within this window
-help_hold_ms = 2000          # HELP gesture must be held this long
-help_repeat_count = 3        # ...or repeated this many times
-help_repeat_window_ms = 3000
 
 [ui]
 scan_interval_ms = 1500
@@ -21,9 +18,6 @@ flick_rearm_px = 50          # ...and must come back this close before the next 
 sample_rate_hz = 500
 eog_lowpass_hz = 10.0
 eog_baseline_s = 1.0         # EOG drift: slow baseline (time constant), frozen while the eyes are moving
-emg_band_hz = [20.0, 150.0]
-notch_hz = 60.0
-emg_rms_ms = 50.0            # jaw EMG envelope smoothing
 refractory_ms = 400
 reliability_interval_ms = 1000
 attempt_window = 8           # reliability: accuracy over the last N gesture attempts per signal
@@ -44,14 +38,11 @@ blink_threshold = 110.0
 blink_floor = 40.0
 blink_max_ms = 400            # longer vertical excursions are looks, not blinks
 double_blink_ms = 700         # two blinks within this = blink_double
-vert_threshold = 200.0        # A1 look up/down (held, so it outlasts a blink)
-vert_floor = 100.0
+vert_threshold = 100.0        # A1 look up/down (held, so it outlasts a blink)
+vert_floor = 50.0
 vert_invert = false           # flip if look_up reads negative on A1 (calibration detects this)
-vert_confirm_ms = 450         # must exceed blink_max_ms, or every blink would read as a look
-vert_rearm_ms = 1500          # same return-to-centre guard as eog_rearm_ms
-jaw_threshold = 20.0
-jaw_floor = 8.0
-jaw_min_ms = 100              # shorter bursts are noise
+vert_pair_ms = 350            # a blink's deep trough / second spike follows within this; a look's doesn't
+vert_rearm_ms = 2500          # rebound after a vertical look arrives 1.8-2.3 s later (measured), so longer than eog_rearm_ms
 max_excursion_s = 5.0         # a "movement" longer than this re-baselines (electrode shift)
 
 [synthetic]
@@ -61,7 +52,6 @@ mains = 6.0                  # 60 Hz pickup amplitude
 drift = 25.0                 # slow baseline wander amplitude
 saccade = 160.0              # look left/right step on A0
 blink = 220.0                # blink spike on A1
-emg = 70.0                   # jaw EMG burst std on A2
 
 [predict]
 timeout_s = 2.0

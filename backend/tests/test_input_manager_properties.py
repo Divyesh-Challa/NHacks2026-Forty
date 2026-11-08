@@ -18,7 +18,7 @@ CFG = {
     "recover_window": 20,
     "debounce_ms": 300,
 }
-RIG = ("eog_h", "eog_v", "blink", "jaw")
+RIG = ("eog_h", "eog_v", "blink")
 SEEDS = range(600)
 STEPS = 120
 HOVER_STEPS = 60
@@ -69,8 +69,7 @@ def check_invariants(im: InputManager, before, changes: list[ModeChangeEvent], t
     assert len(changes) == (1 if after != before else 0), f"{tag}: {len(changes)} mode_change(s), {before} -> {after}"
     if changes:
         assert (changes[0].from_, changes[0].to) == (before[0], after[0]), f"{tag}: bad from/to {changes[0]}"
-    jaw_ok = im.healthy.get("jaw", False)
-    assert (mapping.get("HELP") == "jaw_hold") == jaw_ok, f"{tag}: HELP={mapping.get('HELP')} jaw healthy={jaw_ok}"
+    assert "HELP" not in mapping and "ACCEPT" not in mapping, f"{tag}: no gesture maps to HELP/ACCEPT {mapping}"
     assert set(mapping.values()) <= set(GESTURE_SOURCE), f"{tag}: unknown gesture in {mapping}"
 
 
@@ -151,31 +150,30 @@ def test_hover_between_cutoffs_never_flips_mapping() -> None:
 def scan_all_unhealthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
-        step(im, {"eog_h": 0.3, "blink": 0.3, "jaw": 0.3})
+        step(im, {"eog_h": 0.3, "blink": 0.3})
     return im
 
 
 def scan_blink_and_brow_healthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
-        step(im, {"eog_h": 0.3, "jaw": 0.3, "blink": 0.7, "brow": 0.65})
+        step(im, {"eog_h": 0.3, "blink": 0.7, "brow": 0.65})
     return im
 
 
 def test_probe_setups_reach_intended_state() -> None:
     im = scan_all_unhealthy()
-    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "blink", "jaw"))
+    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "blink"))
     im = scan_blink_and_brow_healthy()
     assert im.mode == "scan" and im.healthy["blink"] and im.healthy["brow"]
-    assert not im.healthy["eog_h"] and not im.healthy["jaw"]
+    assert not im.healthy["eog_h"]
 
 
 @pytest.mark.xfail(strict=True, reason="scan mode with NO healthy candidate falls back to max live reliability, so hovering flips SELECT")
 def test_hover_all_unhealthy_scan_keeps_select() -> None:
     im = scan_all_unhealthy()
     before = im.current_mapping()["SELECT"]
-    step(im, {"eog_h": 0.74, "blink": 0.6, "jaw": 0.6})
-    step(im, {"eog_h": 0.6, "blink": 0.74, "jaw": 0.6})
+    step(im, {"eog_h": 0.74, "blink": 0.6})
     assert im.current_mapping()["SELECT"] == before
 
 

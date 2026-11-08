@@ -11,7 +11,6 @@ export interface ReliabilityPoint {
 const SERIES = [
   { key: 'eog_h', label: 'Eye movement', short: 'Eye', color: '#3987e5' },
   { key: 'blink', label: 'Blink', short: 'Blink', color: '#d95926' },
-  { key: 'jaw', label: 'Jaw', short: 'Jaw', color: '#199e70' },
 ]
 const LABEL_GAP = 12
 

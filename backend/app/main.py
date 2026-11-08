@@ -12,7 +12,7 @@ from .ws import hub, router as ws_router
 
 logging.basicConfig(level=logging.INFO)
 
-DEMO_SIGNAL_GROUPS = {"eye": ["eog_h", "blink"]}
+DEMO_SIGNAL_GROUPS = {"eye": ["eog_h", "eog_v"]}
 
 db.init_db()
 
@@ -81,8 +81,8 @@ def get_messages(patient_id: str) -> list[dict]:
 async def demo_degrade(body: DegradeRequest, patient_id: str = "p1") -> dict:
     """Demo only: tell the signal service to scale a signal's gain down.
 
-    "eye" degrades both eye-electrode signals (eog_h + blink) in one call — the stage demo uses it
-    to go straight from eye-movement wheel mode to jaw-clench scan mode.
+    "eye" degrades the looks (eog_h + eog_v) in one call and leaves blinking alone — the stage demo
+    uses it to go straight from eye-movement wheel mode to double-blink scan mode.
     """
     signals = DEMO_SIGNAL_GROUPS.get(body.signal, [body.signal])
     for signal in signals:

@@ -46,8 +46,9 @@ const feelings = node('Feelings', {}, [
   node('More', {}, [say('Frustrated', "I'm frustrated."), say('Thank you', 'Thank you.'), say('Love you', 'I love you.')]),
 ])
 
-// Picked from the left: Yes up, right empty, No down.
-const yesNo = node('Yes / No', {}, [say('Yes', 'Yes.'), null, say('No', 'No.')])
+// Picked from the left: Yes up, HELP right, No down.
+const helpSlot = leaf('HELP', { help: true })
+const yesNo = node('Yes / No', {}, [say('Yes', 'Yes.'), helpSlot, say('No', 'No.')])
 
 export const WHEEL: WheelNode = {
   word: '',

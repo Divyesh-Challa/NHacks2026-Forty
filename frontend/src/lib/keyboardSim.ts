@@ -1,5 +1,5 @@
 // Keyboard simulator — drives the UI with no hardware and no backend.
-//   ←/→/↑/↓ = LEFT/RIGHT/UP/DOWN (the four looks), B = ACCEPT (double blink), Space = SELECT (jaw clench),
+//   ←/→/↑/↓ = LEFT/RIGHT/UP/DOWN (the four looks), B = ACCEPT (double blink), Space = SELECT (double blink),
 //   Backspace = BACK, hold H (2 s) = HELP, M = toggle wheel/scan, F = mouse-flick sim, A = audio aid
 import type { Command } from './types'
 

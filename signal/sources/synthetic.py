@@ -3,9 +3,9 @@
 Two layers:
 
 1. SyntheticEXG — raw samples in the exact format the Arduino prints (t_us, a0, a1, a2 as 10-bit
-   ADC counts; A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = jaw EMG), with ground-truth
-   labels. Baseline drift, 60 Hz pickup and white noise are always on; gestures add EOG steps,
-   blink spikes and broadband EMG bursts (with a little crosstalk onto the other channels).
+   ADC counts; A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused), with ground-truth
+   labels. Baseline drift, 60 Hz pickup and white noise are always on; gestures add EOG steps
+   and blink spikes (with a little crosstalk onto the other channel).
    Use it to test filters/detectors, drive the live plotter, or record labelled CSVs.
 
 2. SyntheticSource.events() — the stream run.py sends to the backend. Until the real detectors
@@ -14,8 +14,8 @@ Two layers:
    signals false-trigger more at rest. Every outcome feeds ReliabilityTracker, so reliability
    falls because gestures are actually being missed, not because a number was set.
 
-degrade(signal, factor) scales the gesture amplitude for that signal ("eog_h", "blink", "jaw";
-"eye" = eog_h + blink) while the noise stays the same: a fading signal, not a quieter channel.
+degrade(signal, factor) scales the gesture amplitude for that signal ("eog_h", "blink";
+"eye" = eog_h + eog_v) while the noise stays the same: a fading signal, not a quieter channel.
 """
 
 import asyncio
@@ -30,23 +30,20 @@ import messages
 from config import SIGNAL, SYNTHETIC
 from reliability import ReliabilityTracker
 
-CHANNELS = ("eog_h", "eog_v", "jaw")  # A0, A1, A2
-SIGNAL_CHANNEL = {"eog_h": 0, "eog_v": 1, "blink": 1, "jaw": 2}
+CHANNELS = ("eog_h", "eog_v", "unused")  # A0, A1, A2 (A2 is still printed by the Arduino, nothing uses it)
+SIGNAL_CHANNEL = {"eog_h": 0, "eog_v": 1, "blink": 1}
 GESTURE_SIGNAL = {
     "look_left": "eog_h",
     "look_right": "eog_h",
     "blink_double": "blink",
-    "jaw_clench": "jaw",
-    "jaw_hold": "jaw",
 }
-GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "blink_double": 0.65, "jaw_clench": 0.4, "jaw_hold": 2.5}
-DEMO_SIGNALS = ["eog_h", "blink", "jaw"]
-# Eye gestures dominate, as when someone is actively using eye control; HELP (jaw_hold) is never scripted.
-DEFAULT_SCRIPT = ["look_left", "blink_double", "look_right", "jaw_clench", "blink_double", "look_left", "look_right"]
+GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "blink_double": 0.65}
+DEMO_SIGNALS = ["eog_h", "blink"]
+DEFAULT_SCRIPT = ["look_left", "blink_double", "look_right", "blink_double", "look_left", "look_right"]
 
 
 def degrade_targets(signal: str) -> list[str]:
-    return ["eog_h", "blink"] if signal == "eye" else [signal]
+    return ["eog_h", "eog_v"] if signal == "eye" else [signal]  # "eye" = the looks; blinking stays strong
 
 
 @dataclass
@@ -121,12 +118,6 @@ class SyntheticEXG:
                 spike = np.where((d >= 0) & (d <= 0.25), np.sin(math.pi * np.clip(d, 0, 0.25) / 0.25), 0)
                 out[1] += c["blink"] * self.gain["blink"] * spike
                 out[0] += 0.1 * c["blink"] * self.gain["blink"] * spike  # crosstalk
-        elif gesture in ("jaw_clench", "jaw_hold"):
-            env = np.clip(np.minimum(dt, dur - dt) / 0.02, 0, 1)
-            burst = self.rng.normal(0, 1, size=dt.size) * env * c["emg"] * self.gain["jaw"]
-            out[2] = burst
-            out[0] += 0.15 * burst  # jaw EMG leaks onto the eye electrodes
-            out[1] += 0.15 * burst
         return out * inside
 
 
@@ -206,7 +197,7 @@ class SyntheticSource:
             fired = self.detector.false_triggers(gain)
             self.tracker.record_rest(signal, fired)
             if fired:
-                gesture = {"eog_h": "look_right", "blink": "blink_double", "jaw": "jaw_clench"}[signal]
+                gesture = {"eog_h": "look_right", "blink": "blink_double"}[signal]
                 events.append(messages.gesture(signal, gesture, self.detector.confidence(gain) * 0.8))
         return events
 
