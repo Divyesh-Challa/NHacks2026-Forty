@@ -14,9 +14,7 @@ Detectors:
   instead of firing the opposite direction. Must stay past threshold `eog_confirm_ms` (no spikes).
 - BlinkDetector (A1): a blink is a short (< blink_max_ms) positive excursion past threshold; two
   within double_blink_ms = blink_double. Single blinks are ignored — people blink all the time.
-- JawDetector (A2 envelope): a burst past threshold for ≥ jaw_min_ms, reported on release as
-  jaw_clench. A burst still going after help_hold_ms is reported once, immediately, as jaw_hold —
-  and never also as jaw_clench (HELP contract, TASKS.md).
+- VerticalEogDetector (A1): look_up / look_down from the shape of a short pulse pair.
 
 `gain` on each detector is the demo degrade knob for real hardware: it scales the signal so
 gestures land below threshold, exactly as a weakening muscle would.
@@ -24,10 +22,17 @@ gestures land below threshold, exactly as a weakening muscle would.
 
 from dataclasses import dataclass
 
+import logging
+
 import numpy as np
 
-from config import DETECTORS, HELP_HOLD_MS, SIGNAL
-from filters import FS, EmgEnvelope, EogFilter
+from config import DETECTORS, SIGNAL
+from filters import FS, EogFilter
+
+
+log = logging.getLogger("relay.tracker")
+
+LOOK_AXIS = {"look_left": ("h", -1), "look_right": ("h", 1), "look_up": ("v", 1), "look_down": ("v", -1)}
 
 
 @dataclass
@@ -36,6 +41,9 @@ class Detection:
     gesture: str
     confidence: float
     ts: int  # device time, ms
+    peak: float = 0.0  # size of the pulse that produced it (looks only); the position tracker needs it
+    confirmed: bool = True  # look up only: False = a lone positive pulse with no negative swing behind it
+    swing: float = 0.0  # look up only: size of that negative swing
 
 
 @dataclass
@@ -87,13 +95,26 @@ class _Excursion:
 
 class EogDetector(_Excursion):
     source = "eog_h"
+    prefix = "eog"  # settings keys: {prefix}_threshold / _floor / _invert / _confirm_ms
+    names = ("look_left", "look_right")  # (negative, positive) excursion
 
     def __init__(self, fs: float = FS, settings: dict = DETECTORS) -> None:
-        super().__init__(fs, settings["eog_threshold"], settings["eog_floor"])
-        self.polarity = -1.0 if settings["eog_invert"] else 1.0
-        self.confirm_us = settings["eog_confirm_ms"] * 1000
+        p = self.prefix
+        super().__init__(fs, settings[f"{p}_threshold"], settings[f"{p}_floor"])
+        self.polarity = -1.0 if settings[f"{p}_invert"] else 1.0
+        self.confirm_us = settings[f"{p}_confirm_ms"] * 1000
+        self.min_miss_us = 0  # excursions shorter than this are not reported as near-misses
+        # The pill is AC-coupled: a held look fades, so coming back to centre overshoots to the other
+        # side by the faded amount and reads as a look the other way. Ignore that for rearm_ms.
+        self.rearm_us = settings.get(f"{p}_rearm_ms", 0) * 1000
+        self.rearm_until, self.rearm_sign = 0, 0
         self.emitted = False
+        self.confirmed = False
         self.above_since: int | None = None
+
+    def _detection(self, ti: int) -> Detection:
+        gesture = self.names[0] if self.sign < 0 else self.names[1]
+        return Detection(self.source, gesture, confidence(self.peak, self.threshold), int(ti // 1000), float(self.peak))
 
     def process(self, x: np.ndarray, t_us: np.ndarray) -> list[Event]:
         out: list[Event] = []
@@ -101,30 +122,140 @@ class EogDetector(_Excursion):
             lv = self.level(xi) * self.polarity
             if not self.active:
                 self.base.update(xi)
-                if abs(lv) > self.floor and ti >= self.ready_at:
+                return_stroke = ti < self.rearm_until and int(np.sign(lv)) == -self.rearm_sign
+                if abs(lv) > self.floor and ti >= self.ready_at and not return_stroke:
                     self.active, self.sign, self.peak, self.start = True, int(np.sign(lv)), abs(lv), ti
-                    self.emitted, self.above_since = False, None
+                    self.emitted, self.confirmed, self.above_since = False, False, None
                 continue
             m = lv * self.sign
             self.peak = max(self.peak, m)
-            if not self.emitted:
+            if not self.confirmed:
                 if m > self.threshold:
                     self.above_since = ti if self.above_since is None else self.above_since
                     if ti - self.above_since >= self.confirm_us:
-                        gesture = "look_left" if self.sign < 0 else "look_right"
-                        out.append(Detection(self.source, gesture, confidence(self.peak, self.threshold), int(ti // 1000)))
-                        self.emitted = True
+                        self.confirmed = True
                 else:
                     self.above_since = None
+            # Report once the pulse has peaked (falls to 85% of its top), so the detection carries the
+            # pulse's full size: a side-to-side sweep is twice a centre-to-side look (see _track_position).
+            if self.confirmed and not self.emitted and m < 0.85 * self.peak:
+                out.append(self._detection(ti))
+                self.emitted = True
             if m < self.floor / 2:  # eyes back at centre
-                if not self.emitted:
+                if self.confirmed and not self.emitted:
+                    out.append(self._detection(ti))
+                    self.emitted = True
+                elif not self.emitted and ti - self.start >= self.min_miss_us:
                     out.append(NearMiss(self.source, self.peak, int(ti // 1000)))
                 self.active = False
                 self.ready_at = ti + (self.refractory_us if self.emitted else 0)
+                if self.emitted:
+                    self.rearm_until, self.rearm_sign = ti + self.rearm_us, self.sign
             elif ti - self.start > self.max_us:  # stuck off-baseline: electrode moved; start over here
                 self.active = False
                 self.base.value = xi
         return out
+
+
+class VerticalEogDetector:
+    """A1 look up / look down, told apart from blinks by pulse *shape*, not length.
+
+    On the AC-coupled pill a look is a ~100-150 ms pulse, the same length as a blink (measured), so
+    a long hold can't be required. What differs: a blink is a positive spike followed within
+    vert_pair_ms by a deep negative trough (and usually a second spike); a look up is a positive
+    pulse with no such trough; a look down is a negative pulse with no positive spike just before it.
+    A look up is therefore reported vert_pair_ms after the pulse, once no trough or second spike came.
+    No near-misses are emitted (ponytail: eog_v reliability never falls; add them if it must remap).
+    """
+
+    source = "eog_v"
+
+    def __init__(self, fs: float = FS, settings: dict = DETECTORS) -> None:
+        self.threshold, self.floor = settings["vert_threshold"], settings["vert_floor"]
+        self.polarity = -1.0 if settings["vert_invert"] else 1.0
+        self.pair_us = settings.get("vert_pair_ms", 350) * 1000
+        self.rearm_us = settings.get("vert_rearm_ms", 0) * 1000  # return-to-centre overshoot, as in EogDetector
+        # A positive spike below this is a look, not a blink (blinks are ~180-320, up looks ~80-110).
+        self.blink_min = 0.75 * (settings.get("blink_unit") or 2 * settings["blink_threshold"])
+        # Rigs where a look up is biphasic (a positive pulse, then a negative swing of at least this
+        # fraction): require it, so the lone positive pulse of coming back from a down isn't a look up.
+        self.trough_ratio = settings.get("vert_up_trough_ratio", 0.0)
+        self.pending_ok = False
+        self.swing = 0.0
+        self.refractory_us = SIGNAL["refractory_ms"] * 1000
+        self.max_us = DETECTORS["max_excursion_s"] * 1e6
+        self.gain = 1.0
+        self.base = Baseline(fs)
+        self.active = False
+        self.sign, self.peak, self.start = 0, 0.0, 0
+        self.last_pos_end = -(10**12)
+        self.pending: tuple[int, float] | None = None  # (end, peak) of a positive pulse not yet proven a look
+        self.ready_at = 0
+        self.rearm_until, self.rearm_sign = 0, 0
+
+    def process(self, x: np.ndarray, t_us: np.ndarray) -> list[Event]:
+        out: list[Event] = []
+        for xi, ti in zip(x, t_us):
+            if self.base.value is None:
+                self.base.update(xi)
+            lv = (xi - self.base.value) * self.gain * self.polarity
+            if self.pending and not self.active and ti - self.pending[0] >= self.pair_us:
+                # Always reported; `confirmed` says whether it had the negative swing behind it. The zone
+                # tracker uses that: a lone positive pulse from centre is not a look, but from the down
+                # zone it is the eyes coming back, and the tracker needs to see it to stay in step.
+                out += self._emit("look_up", self.pending[1], ti, confirmed=self.pending_ok or self.trough_ratio <= 0, swing=self.swing)
+                self.pending = None
+            if not self.active:
+                self.base.update(xi)
+                if abs(lv) > self.floor:
+                    self.active, self.sign, self.peak, self.start = True, int(np.sign(lv)), abs(lv), ti
+                continue
+            self.peak = max(self.peak, lv * self.sign)
+            if lv * self.sign < self.floor / 2:
+                self.active = False
+                out += self._pulse(self.sign, self.peak, self.start, ti)
+            elif ti - self.start > self.max_us:  # stuck off-baseline: electrode moved; start over here
+                self.active = False
+                self.base.value = xi
+        return out
+
+    def _pulse(self, sign: int, peak: float, start: int, end: int) -> list[Event]:
+        if sign > 0:
+            second_spike = self.pending is not None and start - self.pending[0] <= self.pair_us
+            if peak >= self.threshold:  # a sub-threshold twitch just before is not a "spike", so a weak down still counts
+                self.last_pos_end = end
+            self.pending = None if second_spike else ((end, peak) if peak >= self.threshold else None)
+            self.pending_ok = False
+            self.swing = 0.0
+            return []
+        if (
+            self.pending
+            and start - self.pending[0] <= self.pair_us
+            and peak >= 0.35 * self.pending[1]
+            and self.pending[1] >= self.blink_min  # only a blink-sized spike has a blink's trough;
+        ):  # a small look-up pulse is followed by an equally small negative swing (measured: ~60 / ~45)
+            self.pending = None  # the trough after a blink spike
+            return []
+        if self.pending and start - self.pending[0] <= self.pair_us:
+            need = self.trough_ratio * self.pending[1]
+            if self.trough_ratio > 0:
+                need = max(need, 0.6 * self.threshold)  # a return's small tail (<=17) is not a look's swing (19-75)
+            if peak >= need:
+                self.pending_ok = True  # the negative swing behind a look-up pulse
+                self.swing = max(self.swing, peak)
+        if peak >= self.threshold and start - self.last_pos_end > self.pair_us:
+            return self._emit("look_down", peak, end)
+        return []
+
+    def _emit(self, gesture: str, peak: float, ts: int, confirmed: bool = True, swing: float = 0.0) -> list[Event]:
+        sign = 1 if gesture == "look_up" else -1
+        # The return-to-centre bounce after a vertical look has both signs (measured: a negative swing,
+        # then a small positive one ~1.5 s later), so for vert_rearm_ms nothing else is reported.
+        if ts < self.ready_at or ts < self.rearm_until:
+            return []
+        self.ready_at = ts + self.refractory_us
+        self.rearm_until, self.rearm_sign = ts + self.rearm_us, sign
+        return [Detection(self.source, gesture, confidence(peak, self.threshold), int(ts // 1000), float(peak), confirmed, float(swing))]
 
 
 class BlinkDetector(_Excursion):
@@ -136,19 +267,32 @@ class BlinkDetector(_Excursion):
         self.pair_us = settings["double_blink_ms"] * 1000
         self.last_blink: tuple[int, float] | None = None  # (start ts, peak)
         self.last_miss = -(10**12)
+        self.settle_us = 2_000_000  # after a blink, ignore the undershoot for the baseline for this long
+        self.settle_until = 0
+        self.armed = True
 
     def process(self, x: np.ndarray, t_us: np.ndarray) -> list[Event]:
         out: list[Event] = []
         for xi, ti in zip(x, t_us):
             lv = self.level(xi)
             if not self.active:
-                self.base.update(xi)
-                if lv > self.floor and ti >= self.ready_at:
+                # A blink is followed by a deep undershoot (AC-coupled pill). Don't let the idle baseline
+                # chase it down, or the resting level afterwards looks like a long positive excursion
+                # above a frozen baseline and the second blink of a pair is swallowed.
+                if ti >= self.settle_until or lv > -self.floor:
+                    self.base.update(xi)
+                if not self.armed and lv < self.floor / 2:
+                    self.armed = True  # the tail of the last blink has fully come down
+                if self.armed and lv > self.floor and ti >= self.ready_at:
                     self.active, self.peak, self.start = True, lv, ti
                 continue
             self.peak = max(self.peak, lv)
-            if lv < self.floor / 2:
+            # A blink is over once it has fallen well away from its own peak. A fixed low line alone can
+            # sit just under the resting level after the undershoot, so the pulse would never close.
+            if lv < max(self.floor / 2, 0.35 * self.peak):
                 self.active = False
+                self.armed = lv < self.floor / 2  # still in the tail: wait for it to finish before reopening
+                self.settle_until = ti + self.settle_us
                 out += self._ended(ti)
             elif ti - self.start > self.max_us:
                 self.active = False
@@ -173,67 +317,40 @@ class BlinkDetector(_Excursion):
         return []
 
 
-class JawDetector:
-    source = "jaw"
-
-    def __init__(self, fs: float = FS, settings: dict = DETECTORS, hold_ms: float = HELP_HOLD_MS) -> None:
-        self.threshold, self.floor = settings["jaw_threshold"], settings["jaw_floor"]
-        self.min_us = settings["jaw_min_ms"] * 1000
-        self.hold_us = hold_ms * 1000
-        self.refractory_us = SIGNAL["refractory_ms"] * 1000
-        self.gain = 1.0
-        self.active = False
-        self.start = 0
-        self.crossed_at: int | None = None
-        self.held = False
-        self.peak = 0.0
-        self.ready_at = 0
-
-    def process(self, env: np.ndarray, t_us: np.ndarray) -> list[Event]:
-        out: list[Event] = []
-        for ei, ti in zip(env, t_us):
-            e = ei * self.gain
-            if not self.active:
-                if e > self.floor and ti >= self.ready_at:
-                    self.active, self.start, self.peak, self.crossed_at, self.held = True, ti, e, None, False
-                continue
-            self.peak = max(self.peak, e)
-            if e > self.threshold and self.crossed_at is None:
-                self.crossed_at = ti
-            if self.crossed_at is not None and not self.held and ti - self.crossed_at >= self.hold_us:
-                out.append(Detection(self.source, "jaw_hold", confidence(self.peak, self.threshold), int(ti // 1000)))
-                self.held = True
-            if e < 0.75 * self.floor:  # released (hysteresis: no chatter around the floor)
-                self.active = False
-                if self.held:
-                    self.ready_at = ti + self.refractory_us
-                elif self.crossed_at is not None and ti - self.crossed_at >= self.min_us:
-                    out.append(Detection(self.source, "jaw_clench", confidence(self.peak, self.threshold), int(ti // 1000)))
-                    self.ready_at = ti + self.refractory_us
-                elif self.crossed_at is None and ti - self.start >= self.min_us:
-                    out.append(NearMiss(self.source, self.peak, int(ti // 1000)))
-        return out
-
-
 class Pipeline:
-    """Raw Arduino rows (t_us, a0, a1, a2) in, gesture events out. Streaming."""
+    """Raw Arduino rows (t_us, a0, a1, a2) in, gesture events out. Streaming. A2 is ignored."""
 
     def __init__(self, fs: float = FS, settings: dict | None = None) -> None:
         s = {**DETECTORS, **(settings or {})}
-        self.filters = (EogFilter(fs), EogFilter(fs), EmgEnvelope(fs))
+        self.filters = (EogFilter(fs), EogFilter(fs))
         self.eog = EogDetector(fs, s)
         self.blink = BlinkDetector(fs, s)
-        self.jaw = JawDetector(fs, s)
-        self.detectors = {"eog_h": self.eog, "blink": self.blink, "jaw": self.jaw}
-        self.last_features: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+        self.vert = VerticalEogDetector(fs, s)
+        self.detectors = {"eog_h": self.eog, "blink": self.blink, "eog_v": self.vert}
+        self.last_features: tuple[np.ndarray, np.ndarray] | None = None
+        self.h_guard_ms = s.get("vert_h_guard_ms", 700)  # drop up/down this close to a left/right event
+        self.last_h_ts = -(10**12)
+        self.up_needs_swing = s.get("vert_up_trough_ratio", 0.0) > 0
+        self.up_bounce_ms = s.get("vert_up_bounce_ms", 1200)
+        self.up_swing_ratio = s.get("vert_up_swing_ratio", 0.3)
+        self.last_up_ts = -10**12
+        self.return_hold_ms = s.get("look_return_hold_ms", 8000)  # 0 turns the position tracking off
+        self.position: dict[str, tuple[int, int]] = {"h": (0, 0), "v": (0, 0)}  # axis -> (zone, ts of that look)
+        # One unit = a centre-to-side look. A pulse at least sweep_ratio units big is a side-to-side sweep
+        # (2 units). Vertical pulses are small and noisy, so its boundary is stricter.
+        self.unit = {"h": s.get("eog_unit") or 2 * s["eog_threshold"], "v": s.get("vert_unit") or 2 * s["vert_threshold"]}
+        self.sweep_ratio = {"h": s.get("eog_sweep_ratio", 1.5), "v": s.get("vert_sweep_ratio", 2.2)}
+        # The same look again with no return between: vertical has a bounce (small pulses either side of
+        # the return), horizontal returns are clean and detected, so its guard is off by default.
+        self.repeat_guard_ms = {"h": s.get("eog_repeat_guard_ms", 0), "v": s.get("look_repeat_guard_ms", 3000)}
 
     def set_gain(self, signal: str, factor: float) -> None:
-        for s in ["eog_h", "blink"] if signal == "eye" else [signal]:
+        for s in ["eog_h", "eog_v"] if signal == "eye" else [signal]:
             if s in self.detectors:
                 self.detectors[s].gain = factor
 
-    def features(self, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Filtered traces (EOG-H, EOG-V, jaw envelope) — for plotting and calibration."""
+    def features(self, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Filtered traces (EOG-H, EOG-V) — for plotting and calibration."""
         rows = np.asarray(rows).reshape(-1, 4)
         return tuple(f(rows[:, i + 1].astype(float)) for i, f in enumerate(self.filters))
 
@@ -241,7 +358,73 @@ class Pipeline:
         rows = np.asarray(rows).reshape(-1, 4)
         if rows.size == 0:
             return []
-        h, v, env = self.last_features = self.features(rows)
+        h, v = self.last_features = self.features(rows)
         t = rows[:, 0]
-        events = self.eog.process(h, t) + self.blink.process(v, t) + self.jaw.process(env, t)
-        return sorted(events, key=lambda e: e.ts)
+        horizontal = self.eog.process(h, t)
+        if horizontal:
+            self.last_h_ts = max(self.last_h_ts, max(e.ts for e in horizontal))
+        # A horizontal look leaks onto A1. A real look is horizontal or vertical, not both, so vertical
+        # detections right next to a horizontal event (either side, across chunks too) are crosstalk.
+        guard = self.h_guard_ms
+        vertical = [
+            e
+            for e in self.vert.process(v, t)
+            if not any(abs(e.ts - h_ev.ts) <= guard for h_ev in horizontal) and not 0 <= e.ts - self.last_h_ts <= guard
+        ]
+        events = horizontal + self.blink.process(v, t) + vertical
+        return self._track_position(sorted(events, key=lambda e: e.ts))
+
+    def _track_position(self, events: list[Event]) -> list[Event]:
+        """Follow which zone each axis is in (-1 / 0 / +1) from the size of every look pulse.
+
+        The pill is AC-coupled: it only reports movement, never position. A held look fades within a
+        second, so the return to centre reads as a fresh, full-size look the other way (measured: look
+        right 145, return 139, 2.2 s later), and a direct side-to-side sweep is a pulse twice as big.
+        Counting units fixes both: a pulse of one unit moves one zone, a pulse of two units moves two.
+          centre -> side              report the look
+          side -> centre              the eyes came back: not reported
+          side -> other side (sweep)  report the look in the new direction
+        A look only counts when it lands on a side. After look_return_hold_ms without a look the zone
+        resets to centre, so a missed return can't swallow looks forever.
+        """
+        if self.return_hold_ms <= 0:
+            return events
+        out: list[Event] = []
+        seen: list[tuple[Detection, int]] = []
+        for e in events:
+            axis = LOOK_AXIS.get(e.gesture) if isinstance(e, Detection) else None
+            if axis is None:
+                out.append(e)
+                continue
+            name, sign = axis
+            pos, ts = self.position[name]
+            seen.append((e, pos if e.ts - ts <= self.return_hold_ms else 0))
+            if e.ts - ts > self.return_hold_ms:
+                pos = 0
+            if self.up_needs_swing and name == "v":
+                if e.gesture == "look_up" and e.confirmed and e.swing >= self.up_swing_ratio * e.peak:
+                    # Positive pulse with a PROPORTIONAL negative swing (measured 35-50% of the pulse; a
+                    # return's tail is ~20%) is a real look up wherever the zone says we are. Re-syncs it.
+                    self.position[name] = (1, e.ts)
+                    self.last_up_ts = e.ts
+                    out.append(e)
+                    continue
+                if e.gesture == "look_down" and 0 <= e.ts - self.last_up_ts <= self.up_bounce_ms:
+                    continue  # the dip right after an up look is part of the up (measured 0.6 s later)
+            if pos == 0 and not e.confirmed:
+                continue  # a lone pulse from centre: noise or the return from a look we missed, not a look
+            units = 2 if e.peak >= self.sweep_ratio[name] * self.unit[name] else 1
+            new = max(-1, min(1, pos + sign * units))
+            if new == pos and e.ts - ts <= self.repeat_guard_ms[name]:
+                continue  # the same look again, moments later, with no return between: the bounce, not a new look
+            self.position[name] = (new, e.ts)
+            if new != 0:
+                out.append(e)
+        if seen and log.isEnabledFor(logging.INFO):
+            kept = {id(x) for x in out}
+            for e, pos in seen:
+                log.info(
+                    "%-9s peak=%4.0f swing=%3.0f conf=%d zone_before=%+d -> %s",
+                    e.gesture, e.peak, e.swing, e.confirmed, pos, "KEPT" if id(e) in kept else "dropped",
+                )
+        return out

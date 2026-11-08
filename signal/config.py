@@ -14,6 +14,5 @@ with open(ROOT / "config" / "relay.toml", "rb") as f:
 SIGNAL = _TOML["signal"]
 SYNTHETIC = _TOML["synthetic"]
 DETECTORS = _TOML["detectors"]
-HELP_HOLD_MS = _TOML["input"]["help_hold_ms"]
 
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8000/ws/signal")

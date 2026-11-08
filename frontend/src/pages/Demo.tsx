@@ -8,17 +8,15 @@ import { connect } from '../lib/ws'
 import './demo.css'
 
 const PATIENT_ID = 'p1'
-const SIGNALS = ['eog_h', 'blink', 'jaw'] as const
-const COMMANDS = ['LEFT', 'RIGHT', 'SELECT', 'BACK', 'HELP'] as const
-const LABELS: Record<string, string> = { eog_h: 'Eye movement', eog_v: 'Eye up/down', blink: 'Blink', jaw: 'Jaw', brow: 'Eyebrow' }
+const SIGNALS = ['eog_h', 'blink'] as const
+const COMMANDS = ['LEFT', 'RIGHT', 'UP', 'DOWN', 'SELECT', 'ACCEPT', 'BACK', 'HELP'] as const
+const LABELS: Record<string, string> = { eog_h: 'Eye movement', eog_v: 'Eye up/down', blink: 'Blink', brow: 'Eyebrow' }
 const GESTURES: Record<string, string> = {
   look_left: 'Look left',
   look_right: 'Look right',
   look_up: 'Look up',
   look_down: 'Look down',
   blink_double: 'Double blink',
-  jaw_clench: 'Jaw clench',
-  jaw_hold: 'Jaw hold',
   brow_raise: 'Eyebrow raise',
 }
 // Gesture -> the signal that produces it (mirrors GESTURE_SOURCE in backend/app/input_manager.py).
@@ -28,8 +26,6 @@ const SOURCE: Record<string, string> = {
   look_up: 'eog_v',
   look_down: 'eog_v',
   blink_double: 'blink',
-  jaw_clench: 'jaw',
-  jaw_hold: 'jaw',
   brow_raise: 'brow',
 }
 // Fallbacks until GET /config answers; the backend's values win.
@@ -127,8 +123,8 @@ export default function Demo() {
             {rel ? (
               <>
                 <p className="mode-figure">
-                  {rel.mode === 'split' ? 'Split mode' : 'Scan mode'}
-                  <span>{rel.mode === 'split' ? 'two gestures narrow the board' : 'one gesture selects the highlight'}</span>
+                  {rel.mode === 'wheel' ? 'Wheel mode' : 'Scan mode'}
+                  <span>{rel.mode === 'wheel' ? 'four eye directions pick a slot' : 'one gesture selects the highlight'}</span>
                 </p>
                 <table className="mapping">
                   <thead>
@@ -189,8 +185,8 @@ export default function Demo() {
                 <h3>Lose the eyes</h3>
                 <p>
                   {scanDone
-                    ? 'Done. Relay is in scan mode; finish the next message with a jaw clench.'
-                    : `Drops eye movement and blink to 30% gain. Relay switches after ${rules.remap_window} low readings.`}
+                    ? 'Done. Relay is in scan mode; finish the next message with a double blink.'
+                    : `Drops eye movement to 30% gain; blinking stays strong. Relay switches after ${rules.remap_window} low readings.`}
                 </p>
                 <div className="actions">
                   <button className="primary" disabled={busy} onClick={() => run('Eyes degraded', [['eye', 0.3]])}>
@@ -203,17 +199,17 @@ export default function Demo() {
               </li>
               <li>
                 <h3>Call for help</h3>
-                <p>Hold a jaw clench for 2 s, or hold H on the patient screen. The caregiver phone rings.</p>
+                <p>Look at the HELP slot (Yes / No, then right) and double blink to confirm, or hold H on the patient screen. The caregiver phone rings.</p>
                 <a className="con-link" href="/caregiver" target="_blank" rel="noreferrer">
                   Open caregiver
                 </a>
               </li>
             </ol>
             <div className="reset">
-              <button className="quiet" disabled={busy} onClick={() => run('All signals restored', [['eye', 1], ['jaw', 1]])}>
+              <button className="quiet" disabled={busy} onClick={() => run('All signals restored', [['eye', 1]])}>
                 Restore all
               </button>
-              <span>Back to split after {rules.recover_window} readings above {pct(rules.recover_cutoff)}.</span>
+              <span>Back to wheel after {rules.recover_window} readings above {pct(rules.recover_cutoff)}.</span>
             </div>
             {last && (
               <p className={`con-result ${last.ok ? '' : 'neg'}`} role="status">

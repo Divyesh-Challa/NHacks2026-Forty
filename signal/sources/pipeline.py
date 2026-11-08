@@ -21,7 +21,7 @@ from config import SIGNAL
 from detectors import Detection, Pipeline
 from reliability import ReliabilityTracker
 
-SIGNALS = ["eog_h", "blink", "jaw"]
+SIGNALS = ["eog_h", "eog_v", "blink"]
 POLL_S = 0.02
 
 

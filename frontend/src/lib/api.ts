@@ -18,7 +18,10 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getBoards = (patientId: string) => json<Board[]>(`/patients/${patientId}/boards`)
 export const getConfig = () =>
-  json<{ ui: { scan_interval_ms: number }; input: { reliability_cutoff: number } }>('/config')
+  json<{
+    ui: { scan_interval_ms: number; flick_px?: number; flick_rearm_px?: number }
+    input: { reliability_cutoff: number }
+  }>('/config')
 export const login = (email: string, password: string) =>
   json<{ patient_id: string; token: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
 export const pair = (code: string) =>
@@ -28,7 +31,7 @@ export const predict = (patient_id: string, recent_messages: string[]) =>
     method: 'POST',
     body: JSON.stringify({ patient_id, recent_messages, time_of_day: new Date().toTimeString().slice(0, 5) }),
   })
-export const degrade = (signal: 'eye' | 'eog_h' | 'blink' | 'jaw', factor: number) =>
+export const degrade = (signal: 'eye' | 'eog_h' | 'eog_v' | 'blink', factor: number) =>
   json<{ ok: boolean; signals: string[] }>('/demo/degrade', { method: 'POST', body: JSON.stringify({ signal, factor }) })
 
 // Caregiver-only routes (need the login token). A 401 means the token expired or is invalid.

@@ -1,8 +1,8 @@
-"""Detectors on synthetic waveforms: every gesture detected, no extras, HELP contract, near-misses."""
+"""Detectors on synthetic waveforms: every gesture detected, no extras, near-misses."""
 
 import numpy as np
 
-from detectors import BlinkDetector, Detection, JawDetector, NearMiss, Pipeline, confidence
+from detectors import BlinkDetector, Detection, NearMiss, Pipeline, confidence
 from sources.synthetic import SyntheticEXG
 
 FS = 500
@@ -28,7 +28,8 @@ def names(events: list) -> list[str]:
     return [e.gesture if isinstance(e, Detection) else f"miss:{e.source}" for e in events]
 
 
-ALL = ["look_left", "look_right", "blink_double", "jaw_clench", "look_right", "look_left", "blink_double"]
+# Opposite looks are kept > look_return_hold_ms (8 s) apart: closer than that, the second one is the eyes returning.
+ALL = ["look_left", "look_left", "blink_double", "blink_double", "look_right", "look_right"]
 
 
 def test_every_gesture_detected_once_in_order() -> None:
@@ -53,17 +54,6 @@ def test_look_and_return_does_not_fire_the_opposite_direction() -> None:
     assert names(run(["look_left"] * 4, gap_s=2.0)) == ["look_left"] * 4
 
 
-def test_help_hold_emits_jaw_hold_once_and_no_clench() -> None:
-    events = run(["jaw_hold"])
-    assert names(events) == ["jaw_hold"]
-    hold = events[0]
-    assert 1000 + 2000 <= hold.ts <= 1000 + 2400  # reported as soon as the 2 s hold is reached
-
-
-def test_short_clench_is_never_help() -> None:
-    assert names(run(["jaw_clench"] * 3)) == ["jaw_clench"] * 3
-
-
 def test_single_blink_is_ignored() -> None:
     det = BlinkDetector()
     t = np.arange(2 * FS) * 2000
@@ -72,8 +62,109 @@ def test_single_blink_is_ignored() -> None:
     assert det.process(x, t) == []
 
 
+def test_double_blink_with_deep_undershoot_is_detected() -> None:
+    # AC-coupled pills dip far below baseline after each spike (hardware: about -400). The idle baseline
+    # must not chase the dip, or the second blink opens against a lowered baseline and never closes.
+    det = BlinkDetector()
+    t = np.arange(9 * FS) * 2000
+    x = np.full(t.size, 512.0)
+
+    def blink(at_s: float) -> None:
+        i = int(at_s * FS)
+        x[i : i + 75] += 280 * np.sin(np.pi * np.arange(75) / 75)  # 150 ms spike
+        x[i + 75 : i + 175] -= 380 * np.sin(np.pi * np.arange(100) / 100)  # 200 ms dip
+        x[i + 175 : i + 375] -= 90 * np.exp(-np.arange(200) / 80)  # slow recovery
+
+    blink(2.0)
+    blink(2.34)
+    got = [e.gesture for e in det.process(x, t) if isinstance(e, Detection)]
+    assert got == ["blink_double"]
+
+
+def test_blink_closes_when_resting_level_settles_just_above_the_floor() -> None:
+    # After the dip the signal can plateau ~45 above the old baseline for seconds (above floor/2 = 30
+    # for the default floor 40). The blink must still close, or the next blink is swallowed.
+    det = BlinkDetector()
+    t = np.arange(9 * FS) * 2000
+    x = np.full(t.size, 512.0)
+    for at_s in (2.0, 2.34):
+        i = int(at_s * FS)
+        x[i : i + 75] += 280 * np.sin(np.pi * np.arange(75) / 75)
+    x[int(2.34 * FS) + 75 :] += 45  # settled a little above where it started
+    got = [e.gesture for e in det.process(x, t) if isinstance(e, Detection)]
+    assert got == ["blink_double"]
+
+
+def _a1_pulse_rows(with_horizontal_look: bool) -> np.ndarray:
+    """A 120 ms positive pulse on A1 (a look up on its own); optionally a left look on A0 at the same time."""
+    n = 8 * FS
+    rows = np.zeros((n, 4), dtype=float)
+    rows[:, 0] = np.arange(n) * 2000
+    rows[:, 1:] = 512.0
+    i = 3 * FS
+    rows[i : i + 60, 2] += 60 * np.sin(np.pi * np.arange(60) / 60)
+    if with_horizontal_look:
+        ramp = np.clip(np.minimum(np.arange(375), 375 - np.arange(375)) / 25, 0, 1)
+        rows[i - 20 : i + 355, 1] -= 160 * ramp
+    return rows
+
+
+def test_a1_pulse_alone_is_a_vertical_look() -> None:
+    settings = {"vert_threshold": 26.0, "vert_floor": 13.0, "vert_invert": False}
+    events = Pipeline(settings=settings).process(_a1_pulse_rows(False))
+    assert [e.gesture for e in events if isinstance(e, Detection)] == ["look_up"]
+
+
+def test_opposite_look_soon_after_a_look_is_the_return_to_centre() -> None:
+    # Look left (reported), eyes come back (the opposite pulse is NOT a look right), look right (reported).
+    assert names(run(["look_left", "look_right", "look_right"])) == ["look_left", "look_right"]
+
+
+def _ac_coupled(steps: list[tuple[float, float]], seconds: float = 9.0, tau_s: float = 1.0) -> np.ndarray:
+    """A0 for an eye-position trace [(time_s, position)], through a first-order high-pass (the AC-coupled pill)."""
+    pos = np.zeros(int(seconds * FS))
+    for at, value in steps:
+        pos[int(at * FS) :] = value
+    a = tau_s / (tau_s + 1 / FS)
+    y = np.zeros_like(pos)
+    for i in range(1, len(pos)):
+        y[i] = a * (y[i - 1] + pos[i] - pos[i - 1])
+    return 512.0 + y
+
+
+def _looks(a0: np.ndarray) -> list[str]:
+    n = len(a0)
+    rows = np.column_stack([np.arange(n) * 2000, a0, np.full(n, 512), np.full(n, 500)])
+    p = Pipeline(settings={"eog_threshold": 100.0, "eog_floor": 50.0, "eog_rearm_ms": 0})
+    events = []
+    for i in range(0, n, 50):
+        events += p.process(rows[i : i + 50])
+    return [e.gesture for e in events if isinstance(e, Detection) and e.source == "eog_h"]
+
+
+def test_side_to_side_sweep_is_a_look_in_the_new_direction() -> None:
+    # centre -> left (200), then straight across to the right (+200): a 400-unit sweep, then back to centre.
+    # Reported: look_left, look_right. The final return to centre (a single-size opposite pulse) is not.
+    got = _looks(_ac_coupled([(2.0, -200.0), (5.0, 200.0), (8.0, 0.0)], seconds=11.0))
+    assert got == ["look_left", "look_right"]
+
+
+def test_return_to_centre_after_a_held_look_is_not_reported() -> None:
+    assert _looks(_ac_coupled([(2.0, -200.0), (5.0, 0.0)])) == ["look_left"]
+
+
+def test_opposite_look_long_after_a_look_is_a_real_look() -> None:
+    assert names(run(["look_left", "look_right"], gap_s=9.0)) == ["look_left", "look_right"]
+
+
+def test_vertical_detection_next_to_a_horizontal_look_is_dropped_as_crosstalk() -> None:
+    settings = {"vert_threshold": 26.0, "vert_floor": 13.0, "vert_invert": False}
+    events = Pipeline(settings=settings).process(_a1_pulse_rows(True))
+    assert [e.gesture for e in events if isinstance(e, Detection)] == ["look_left"]
+
+
 def test_degraded_gestures_become_near_misses() -> None:
-    events = run(["look_left", "look_right", "blink_double"], gain={"eye": 0.3})
+    events = run(["look_left", "look_right", "blink_double"], gain={"eog_h": 0.3, "blink": 0.3})
     assert names(events) == ["miss:eog_h", "miss:eog_h", "miss:blink"]
     assert all(isinstance(e, NearMiss) for e in events)
 
@@ -87,10 +178,9 @@ def test_hardware_gain_knob_degrades_like_a_weak_signal() -> None:
     assert names(p.process(rows)) == ["miss:eog_h"]
 
 
-def test_jaw_detector_refractory_and_min_duration() -> None:
-    det = JawDetector()
-    t = np.arange(3 * FS) * 2000
-    env = np.zeros(t.size)
-    env[100:120] = 50  # 40 ms spike: too short for a clench
-    env[500:700] = 50  # 400 ms clench
-    assert [e.gesture for e in det.process(env, t) if isinstance(e, Detection)] == ["jaw_clench"]
+def test_a2_is_ignored() -> None:
+    # Whatever is (or isn't) plugged into A2 must never produce a gesture.
+    exg = SyntheticEXG(seed=3)
+    rows = exg.chunk(30 * FS)
+    rows[:, 3] = 512 + 400 * np.sin(np.arange(len(rows)) / 5.0)
+    assert Pipeline().process(rows) == []

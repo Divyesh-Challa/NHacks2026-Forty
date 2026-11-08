@@ -2,6 +2,7 @@
 
   python run.py --source synthetic                  # scripted gestures + keyboard
   python run.py --source synthetic --script none    # keyboard only: type l/r/b/j/h + Enter
+  python run.py --source synthetic --script quiet   # keyboard demo: script runs silently, so degrade still works
   python run.py --source synthetic --detectors real # synthetic waveforms through the real filters/detectors
   python run.py --source arduino --port /dev/tty.usbmodem1101
 """
@@ -25,15 +26,16 @@ def make_source(args: argparse.Namespace):
         from sources.synthetic import DEFAULT_SCRIPT
 
         script = None if args.script == "none" else DEFAULT_SCRIPT
+        quiet = args.script == "quiet"
         if args.detectors == "real":
             from sources.pipeline import PipelineSource
             from tools.streams import SyntheticStream
 
             # Real waveforms take ~1 s per gesture, so space scripted ones further apart.
-            return PipelineSource(SyntheticStream(), script=script, interval_s=args.interval or 2.0)
+            return PipelineSource(SyntheticStream(), script=None if quiet else script, interval_s=args.interval or 2.0)
         from sources.synthetic import SyntheticSource
 
-        return SyntheticSource(interval_s=args.interval or 0.6, script=script)
+        return SyntheticSource(interval_s=args.interval or 0.6, script=script, quiet=quiet)
     from sources.arduino_serial import ArduinoSource
 
     return ArduinoSource(args.port)
@@ -48,12 +50,12 @@ async def listen_controls(ws, source) -> None:
             source.degrade(msg["signal"], msg["factor"])
 
 
-KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double", "j": "jaw_clench", "h": "jaw_hold"}
+KEYS = {"l": "look_left", "r": "look_right", "b": "blink_double"}
 
 
 def read_keyboard(source, loop: asyncio.AbstractEventLoop) -> None:
     """Terminal gesture triggers for the synthetic source (runs in a thread)."""
-    print("keys: l=look left  r=look right  b=double blink  j=jaw clench  h=jaw hold (HELP)  + Enter")
+    print("keys: l=look left  r=look right  b=double blink  + Enter")
     for line in sys.stdin:
         for ch in line.strip().lower():
             if ch in KEYS:
@@ -91,5 +93,5 @@ if __name__ == "__main__":
     p.add_argument("--url", default=BACKEND_WS_URL)
     p.add_argument("--interval", type=float, default=None, help="synthetic: seconds between scripted gestures (0.6 simulated, 2.0 real)")
     p.add_argument("--detectors", choices=["simulated", "real"], default="simulated", help="synthetic: simulated detector (demo default) or real filters/detectors")
-    p.add_argument("--script", choices=["cycle", "none"], default="cycle", help="synthetic: scripted gestures or keyboard only")
+    p.add_argument("--script", choices=["cycle", "none", "quiet"], default="cycle", help="synthetic: scripted gestures, keyboard only, or a silent script (keyboard demo)")
     asyncio.run(main(p.parse_args()))

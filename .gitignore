@@ -28,3 +28,4 @@ signal/recordings/
 .claude/loop/
 .claude/worktrees/
 .claude/settings.local.json
+.superpowers/

@@ -9,7 +9,7 @@ You are the frontend engineer on Relay (Vite + React 19 + TypeScript, react-rout
 
 ## Your lane
 - `frontend/src/**`, `frontend/vite.config.ts`, the `[ui]` section of `config/relay.toml`.
-- The patient screen is used by someone who can only move their eyes or jaw: very large targets, high contrast, readable at a distance, no time pressure in split mode. Everything must work from the keyboard simulator with no hardware and with the backend offline.
+- The patient screen is used by someone who can only move their eyes: very large targets, high contrast, readable at a distance, no time pressure in split mode. Everything must work from the keyboard simulator with no hardware and with the backend offline.
 - All API and WebSocket traffic goes through the Vite `/api` proxy (`frontend/src/lib/api.ts`). Never hard-code a host.
 - Avoid render loops: depend on stable keys (e.g. `items.join('\n')`), not fresh arrays.
 - When you change something visible, run `scripts/screenshot.sh <dir> /patient/p1 …` (add `SIZE=390,844` for a phone), Read the PNGs, and fix what is off before reporting. Say in your report which pages you looked at.

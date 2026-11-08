@@ -28,7 +28,7 @@ class SyntheticStream:
 
 
 class SerialStream:
-    def __init__(self, port: str, baud: int = 115200) -> None:
+    def __init__(self, port: str, baud: int = 250000) -> None:
         import serial  # pyserial
 
         self.ser = serial.Serial(port, baud, timeout=0.1)

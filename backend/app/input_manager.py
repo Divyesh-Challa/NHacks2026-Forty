@@ -4,31 +4,19 @@ Pure logic, no I/O — the hub (ws.py) feeds it events and broadcasts what it re
 Spec: CLAUDE.md "Input manager". Tests: tests/test_input_manager.py.
 
 How it decides:
-  - Each signal (eog_h, blink, jaw, ...) is healthy or unhealthy. A reliability reading for a
+  - Each signal (eog_h, eog_v, blink, ...) is healthy or unhealthy. A reliability reading for a
     signal counts as one attempt. The first reading seeds health (r >= cutoff).
   - healthy -> unhealthy: last `remap_window` readings all below `reliability_cutoff`.
   - unhealthy -> healthy: last `recover_window` readings all >= `recover_cutoff` (hysteresis).
-  - Split mode if a preferred LEFT/RIGHT pair is healthy (first match in SPLIT_PAIRS),
-    else scan mode with one SELECT gesture from SCAN_SELECT.
-  - Scan SELECT is sticky: the current SELECT (including split mode's jaw_clench extra) is kept
-    while it is healthy, or while no candidate is. It is re-picked (most reliable healthy
-    candidate) only when its signal turns unhealthy and another candidate is healthy, or when
-    there is no current SELECT. So it changes only on a health change, never on live values.
-  - A mode_change is emitted when the mode or a primary control (LEFT/RIGHT/SELECT) changes.
-  - Merge window: when a health change would move a primary control while another mapping signal
-    is part-way through its own health-changing run (healthy with a run below `reliability_cutoff`
-    that can reach `remap_window`, or unhealthy with a run at/above `recover_cutoff` that can reach
-    `recover_window`, before `merge_window` readings have passed), the remap is held. It lands when
-    that run completes (and joins the banner), when the run breaks, or when the window ends. So the
-    eye degrade (eog_h and blink failing a few readings apart) gives one split -> scan banner naming
-    both, while a lone loss, or one next to a signal steadily hovering between the cutoffs, is
-    applied at once. A hold lasts at most 12 readings (`merge_window`); at most 9 when the only run
-    being waited on is a loss (a run already under way finishes within `remap_window` - 1 more
-    readings; a pending regain run, or another run starting later, can keep it open up to 12).
-    The health rule itself is never delayed; while held, the old mode and LEFT/RIGHT/SELECT stay and
-    only BACK/HELP follow health. Readings (reliability events) are the clock.
-  - HELP = jaw_hold, which the detector only emits after a sustained (~help_hold_ms) clench,
-    so a short clench can never raise HELP. In scan mode HELP is also a scan item.
+  - Wheel mode (radial wheel, docs/superpowers/specs/2026-11-07-radial-wheel-design.md) if
+    horizontal and vertical eye movement are both healthy and a finish gesture is: the four looks
+    pick slots and the first healthy WHEEL_FINISH gesture (double blink) = SELECT.
+    There is no BACK gesture: looking at the kept slot again goes back.
+    Otherwise scan mode with the most reliable healthy gesture as SELECT.
+  - A mode_change is emitted when the mode or a primary control (looks/SELECT) changes.
+  - HELP is not a gesture. The patient screen has a HELP slot (wheel) / item (scan) that is confirmed
+    with SELECT, then the screen sends the alert itself. ACCEPT (centre suggestion) has no gesture
+    either: double blink is the finish, so it only comes from the keyboard/mouse simulators.
 """
 
 from collections import deque
@@ -52,35 +40,24 @@ GESTURE_SOURCE: dict[str, str] = {
     "look_up": "eog_v",
     "look_down": "eog_v",
     "blink_double": "blink",
-    "jaw_clench": "jaw",
-    "jaw_hold": "jaw",
     "brow_raise": "brow",
 }
 
-# Split-mode (LEFT, RIGHT) pairs in preference order.
-SPLIT_PAIRS: list[tuple[str, str]] = [
-    ("look_left", "look_right"),
-    ("blink_double", "jaw_clench"),
-    ("brow_raise", "jaw_clench"),
-]
-# Scan-mode SELECT candidates. The current SELECT is kept while it is healthy or while none is;
-# otherwise the most reliable healthy candidate is picked.
-SCAN_SELECT = ["jaw_clench", "blink_double", "brow_raise", "look_right"]
-# Optional split-mode extras, assigned when the gesture is healthy and not already used.
-SPLIT_EXTRAS = [("SELECT", "jaw_clench"), ("BACK", "blink_double")]
-HELP_GESTURE = "jaw_hold"
-PRIMARY = ("LEFT", "RIGHT", "SELECT")
-# Sources that some mapping can use; only these can hold a remap open.
-MAPPING_SOURCES = {GESTURE_SOURCE[g] for g in [*sum(SPLIT_PAIRS, ()), *SCAN_SELECT]}
+# Wheel mode: the four looks pick slots.
+WHEEL_LOOKS = {"LEFT": "look_left", "RIGHT": "look_right", "UP": "look_up", "DOWN": "look_down"}
+# Wheel-mode SELECT (finish / confirm) in preference order; the first healthy one wins.
+WHEEL_FINISH = ["blink_double", "brow_raise"]
+# Scan-mode SELECT candidates; the most reliable healthy one wins.
+SCAN_SELECT = ["blink_double", "brow_raise", "look_right"]
+PRIMARY = ("LEFT", "RIGHT", "UP", "DOWN", "SELECT")
 
-# Sources wired on the 3-pill rig; assumed healthy until their first reading arrives.
-DEFAULT_SOURCES = ("eog_h", "eog_v", "blink", "jaw")
+# Sources wired on the 2-pill rig; assumed healthy until their first reading arrives.
+DEFAULT_SOURCES = ("eog_h", "eog_v", "blink")
 
 SOURCE_NAMES = {
     "eog_h": "eye movement",
     "eog_v": "vertical eye movement",
     "blink": "blinking",
-    "jaw": "jaw clench",
     "brow": "eyebrow raise",
 }
 GESTURE_NAMES = {
@@ -89,8 +66,6 @@ GESTURE_NAMES = {
     "look_up": "looking up",
     "look_down": "looking down",
     "blink_double": "double blink",
-    "jaw_clench": "jaw clench",
-    "jaw_hold": "jaw hold",
     "brow_raise": "eyebrow raise",
 }
 
@@ -109,7 +84,7 @@ class InputManager:
     reliability: dict[str, float] = field(default_factory=dict)
     healthy: dict[str, bool] = field(default_factory=lambda: {s: True for s in DEFAULT_SOURCES})
     override: Mode | None = None  # manual mode toggle (keyboard sim)
-    mode: Mode = "split"
+    mode: Mode = "wheel"
     mapping: dict[str, str] = field(default_factory=dict)  # command -> gesture
     _history: dict[str, deque[float]] = field(default_factory=dict)
     _last_emit: dict[str, int] = field(default_factory=dict)  # command -> ts of last emit
@@ -223,32 +198,18 @@ class InputManager:
 
     def _choose(self, use_override: bool = True) -> tuple[Mode, dict[str, str]]:
         mode = self.override if use_override else None
-        pair = next((p for p in SPLIT_PAIRS if self._ok(p[0]) and self._ok(p[1])), None)
+        eyes = all(self._ok(g) for g in WHEEL_LOOKS.values())
+        finish = next((g for g in WHEEL_FINISH if self._ok(g)), None)
 
-        if mode != "scan" and pair:
-            mapping = {"LEFT": pair[0], "RIGHT": pair[1]}
-            for cmd, g in SPLIT_EXTRAS:
-                if self._ok(g) and g not in mapping.values():
-                    mapping[cmd] = g
-            if self._ok(HELP_GESTURE):
-                mapping["HELP"] = HELP_GESTURE
-            return "split", mapping
+        if mode != "scan" and eyes and finish:
+            return "wheel", {**WHEEL_LOOKS, "SELECT": finish}
 
-        if mode == "split":  # forced split with no healthy pair: fall back to eye movement
-            return "split", {"LEFT": "look_left", "RIGHT": "look_right"}
+        if mode == "wheel":  # forced wheel without healthy eyes: fall back to the default mapping
+            return "wheel", {**WHEEL_LOOKS, "SELECT": WHEEL_FINISH[0]}
 
-        # Sticky SELECT: keep the current one (a split-mode SELECT carries over) while it is healthy,
-        # or while nothing is. Health has hysteresis, so live values between the cutoffs never flip it.
-        healthy = [g for g in SCAN_SELECT if self._ok(g)]
-        current = self.mapping.get("SELECT")
-        if current in SCAN_SELECT and (self._ok(current) or not healthy):
-            select = current
-        else:
-            select = max(healthy or SCAN_SELECT, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
-        mapping = {"SELECT": select}
-        if self._ok(HELP_GESTURE):
-            mapping["HELP"] = HELP_GESTURE
-        return "scan", mapping
+        candidates = [g for g in SCAN_SELECT if self._ok(g)] or SCAN_SELECT
+        select = max(candidates, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
+        return "scan", {"SELECT": select}
 
     def _changes_primary(self, mode: Mode, mapping: dict[str, str]) -> bool:
         return mode != self.mode or any(self.mapping.get(k) != mapping.get(k) for k in PRIMARY)
@@ -319,13 +280,11 @@ class InputManager:
         regained = sorted(self._regained, key=_source_order)
 
         def build() -> str:
+            select = GESTURE_NAMES[self.mapping["SELECT"]]
             if self.mode == "scan":
-                target = f"scan mode with {GESTURE_NAMES[self.mapping['SELECT']]} to select"
+                target = f"scan mode with {select} to select"
             else:
-                target = _join([GESTURE_NAMES[self.mapping[k]] for k in ("LEFT", "RIGHT")])
-                if self.mapping["LEFT"] == "look_left":
-                    target = "eye movement"
-            fell = back = ""
+                target = f"eye movement with {select} to finish"
             if lost:
                 fell = f"{_join([SOURCE_NAMES.get(s, s) for s in lost])} reliability fell below "
                 fell += f"{self.cfg['reliability_cutoff']:.0%}"

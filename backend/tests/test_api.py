@@ -48,15 +48,16 @@ def test_mode_change_serializes_from(client: TestClient) -> None:
         patient.receive_json()
         patient.send_json({"type": "set_mode", "mode": "scan"})
         msg = patient.receive_json()
-        patient.send_json({"type": "set_mode", "mode": "split"})
+        patient.send_json({"type": "set_mode", "mode": "wheel"})
         patient.receive_json()
-    assert msg == {"type": "mode_change", "from": "split", "to": "scan", "reason": "Switched to scan mode by hand (testing)."}
+    assert msg == {"type": "mode_change", "from": "wheel", "to": "scan", "reason": "Switched to scan mode by hand (testing)."}
 
 
-def test_jaw_hold_alerts_caregiver(client: TestClient, token: str) -> None:
+def test_patient_help_alerts_caregiver(client: TestClient, token: str) -> None:
     with client.websocket_connect(f"/ws/caregiver/p1?token={token}") as caregiver:
-        with client.websocket_connect("/ws/signal?patient_id=p1") as sig:
-            sig.send_json({"type": "gesture", "source": "jaw", "gesture": "jaw_hold", "confidence": 0.9, "ts": 5})
+        with client.websocket_connect("/ws/patient/p1") as patient:
+            patient.receive_json()
+            patient.send_json({"type": "alert", "message": "HELP", "ts": 5})
             msg = caregiver.receive_json()
     assert msg["type"] == "alert" and msg["message"] == "HELP"
 
@@ -91,7 +92,7 @@ def test_spoken_and_alert_saved_to_history(client: TestClient, auth: dict) -> No
         patient.send_json({"type": "alert", "message": "HELP", "ts": 200})
         patient.send_json({"type": "set_mode", "mode": "scan"})  # round-trip to ensure both were handled
         patient.receive_json()
-        patient.send_json({"type": "set_mode", "mode": "split"})
+        patient.send_json({"type": "set_mode", "mode": "wheel"})
         patient.receive_json()
     history = client.get("/patients/p1/messages", headers=auth).json()
     assert {"spoken", "alert"} <= {m["type"] for m in history}
@@ -102,7 +103,7 @@ def test_degrade_eye_expands_to_both_eye_signals(client: TestClient) -> None:
     with client.websocket_connect("/ws/signal?patient_id=p1") as sig:
         r = client.post("/demo/degrade", json={"signal": "eye", "factor": 0.3}).json()
         got = [sig.receive_json()["signal"], sig.receive_json()["signal"]]
-    assert r["signals"] == ["eog_h", "blink"] and got == ["eog_h", "blink"]
+    assert r["signals"] == ["eog_h", "eog_v"] and got == ["eog_h", "eog_v"]
 
 
 def test_caregiver_routes_require_login(client: TestClient) -> None:

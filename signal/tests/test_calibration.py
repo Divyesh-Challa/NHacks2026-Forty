@@ -24,7 +24,7 @@ def test_segments() -> None:
 
 def test_synthetic_calibration_is_accurate_with_no_false_triggers() -> None:
     result = calibrate(*synthetic_session(reps=6, seed=1))
-    for sig in ("eog_h", "blink", "jaw"):
+    for sig in ("eog_h", "blink"):
         r = result["signals"][sig]
         assert r["accuracy"] >= 0.9 and r["false_trigger_rate"] <= 0.05, (sig, r)
     assert result["signals"]["eog_h"]["attempts"] == 12  # left + right

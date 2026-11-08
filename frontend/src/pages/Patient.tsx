@@ -1,197 +1,265 @@
-// Patient screen: boards -> phrase -> TTS. Works with keyboard sim alone; backend optional.
+// Patient screen: radial wheel → read-back → speech. Works with the keyboard sim alone; backend optional.
+// All behaviour lives in lib/wheelMachine.ts; this page feeds it commands and ticks, then carries out
+// the effects it returns (aid voice, real speech, learned words, HELP).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { LetterBoard } from '../components/LetterBoard'
-import { SPELL_DELETE, SPELL_ITEMS, SPELL_SPACE, SPELL_SPEAK } from '../lib/spell'
+import { useParams } from 'react-router-dom'
+import { LetterBoard, LetterGrid } from '../components/LetterBoard'
 import { ModeBanner } from '../components/ModeBanner'
-import { PredictionStrip } from '../components/PredictionStrip'
-import { ScanBoard } from '../components/ScanBoard'
-import { SplitBoard } from '../components/SplitBoard'
-import { getBoards, getConfig, predict } from '../lib/api'
+import { RadialWheel } from '../components/RadialWheel'
+import { getConfig } from '../lib/api'
+import { FlickDetector } from '../lib/flickSim'
 import { attachKeyboardSim } from '../lib/keyboardSim'
-import { pairedToken } from '../lib/pairing'
-import { speak } from '../lib/tts'
-import type { Board, Command, Mode, ModeChangeEvent } from '../lib/types'
+import { SPELL_ITEMS } from '../lib/spell'
+import { aid, speak, unlock } from '../lib/tts'
+import type { Command, Mode, ModeChangeEvent } from '../lib/types'
+import { keyChain, view } from '../lib/wheel'
+import type { Dir } from '../lib/wheel'
+import { INITIAL, step, targets } from '../lib/wheelMachine'
+import type { Action, Ctx, MachineState, Target } from '../lib/wheelMachine'
+import { WHEEL } from '../lib/wheelTree'
+import { learn, loadWords, saveWords, suggest } from '../lib/words'
+import type { WordLink } from '../lib/words'
 import { connect, type RelaySocket } from '../lib/ws'
-
-// Used when the backend is down so the board still demos.
-const OFFLINE_BOARDS: Board[] = [
-  { id: 'needs', title: 'Needs', items: ['I need water', "I'm hungry", 'Bathroom', 'Reposition me', "I'm in pain"] },
-  { id: 'yesno', title: 'Yes / No', items: ['Yes', 'No'] },
-]
-const SPELL_BOARD: Board = { id: '__spell', title: 'Spell', items: SPELL_ITEMS }
-const SCAN_BACK = '← Back'
-const SCAN_HELP = '⚠ HELP'
-const PREDICTION_MARK = '★ '
 
 const GESTURE_LABELS: Record<string, string> = {
   look_left: 'look left',
   look_right: 'look right',
+  look_up: 'look up',
+  look_down: 'look down',
   blink_double: 'double blink',
-  jaw_clench: 'clench jaw',
-  jaw_hold: 'hold jaw 2 s',
   brow_raise: 'raise eyebrows',
+}
+const LOOK_COMMANDS: Record<Dir, Command> = { up: 'UP', right: 'RIGHT', down: 'DOWN', left: 'LEFT' }
+
+function readFlag(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    return v === null ? fallback : v === '1'
+  } catch {
+    return fallback
+  }
+}
+function writeFlag(key: string, on: boolean): void {
+  try {
+    localStorage.setItem(key, on ? '1' : '0')
+  } catch {
+    // Blocked storage: the setting lasts for this session.
+  }
 }
 
 export default function Patient() {
   const { id = 'p1' } = useParams()
-  const [boards, setBoards] = useState<Board[]>(OFFLINE_BOARDS)
-  const [boardId, setBoardId] = useState<string | null>(null)
-  const [mode, setMode] = useState<Mode>('split')
+  const [machine, setMachine] = useState<MachineState>(INITIAL)
+  const [mode, setMode] = useState<Mode>('wheel')
+  const [links, setLinks] = useState<WordLink[]>(() => loadWords(id))
+  const [aidOn, setAidOn] = useState(() => readFlag('relay_aid', true))
+  const [flickOn, setFlickOn] = useState(() => readFlag('relay_flick', false))
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [scanMs, setScanMs] = useState(1500)
-  const [command, setCommand] = useState<{ command: Command; id: number } | null>(null)
+  const [flickCfg, setFlickCfg] = useState({ flickPx: 160, rearmPx: 50 })
   const [modeChange, setModeChange] = useState<ModeChangeEvent | null>(null)
   const [spoken, setSpoken] = useState<string[]>([])
-  // Predictions remember which (patient, spoken) they answer; a mismatch means a request is in flight.
-  const [prediction, setPrediction] = useState<{ id: string; spoken: string[]; phrases: string[] } | null>(null)
-  const predictions = prediction?.phrases ?? []
-  const predicting = !prediction || prediction.id !== id || prediction.spoken !== spoken
-  const [spelled, setSpelled] = useState('')
   const [helpActive, setHelpActive] = useState(false)
   const [connected, setConnected] = useState(false)
-  // The stage demo runs unpaired: with no token the WS simply connects without ?token=.
-  const token = useMemo(() => pairedToken(id), [id])
+  const [tickEpoch, setTickEpoch] = useState(0)
   const sock = useRef<RelaySocket | null>(null)
-  const seq = useRef(0)
 
-  const help = useCallback(() => {
-    setHelpActive(true)
-    sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() })
-  }, [])
-
-  const dispatch = useCallback(
-    (c: Command) => {
-      if (c === 'HELP') return help()
-      if (c === 'BACK' && boardId) return setBoardId(null)
-      setCommand({ command: c, id: ++seq.current })
-    },
-    [boardId, help],
+  const ctx: Ctx = useMemo(
+    () => ({ root: WHEEL, mode, suggestFor: (p) => suggest(links, keyChain(p), Date.now()) }),
+    [mode, links],
   )
-  const dispatchRef = useRef(dispatch)
+
+  // The socket, timers and key handlers outlive renders, so they read the latest values from here.
+  const machineRef = useRef(machine)
+  const live = useRef({ ctx, aidOn, links })
   useEffect(() => {
-    dispatchRef.current = dispatch
-  }, [dispatch])
+    live.current = { ctx, aidOn, links }
+  })
+
+  const run = useCallback(
+    (action: Action) => {
+      const { ctx, aidOn, links } = live.current
+      const [next, effects] = step(machineRef.current, action, ctx)
+      machineRef.current = next
+      setMachine(next)
+      // Anything but a tick restarts the scan clock, so the first highlight after a pick gets a full interval.
+      if (action.type !== 'tick') setTickEpoch((n) => n + 1)
+      let nextLinks = links
+      for (const e of effects) {
+        if (e.kind === 'aid') {
+          if (aidOn || e.always) aid(e.text, e.always)
+        } else if (e.kind === 'say') {
+          // Confirmed sentence — the only place the real voice fires.
+          speak(e.text)
+          setSpoken((s) => [e.text, ...s].slice(0, 5))
+          sock.current?.send({ type: 'spoken', text: e.text, path: e.path, ts: Date.now() })
+        } else if (e.kind === 'learn') {
+          nextLinks = learn(nextLinks, e.key, e.word, Date.now())
+        } else {
+          setHelpActive(true)
+          sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() })
+        }
+      }
+      if (nextLinks !== links) {
+        live.current.links = nextLinks
+        setLinks(nextLinks)
+        saveWords(id, nextLinks)
+      }
+    },
+    [id],
+  )
 
   useEffect(() => {
-    getBoards(id).then(setBoards).catch(() => {})
-    getConfig().then((c) => setScanMs(c.ui.scan_interval_ms)).catch(() => {})
+    getConfig()
+      .then((c) => {
+        setScanMs(c.ui.scan_interval_ms)
+        setFlickCfg({ flickPx: c.ui.flick_px ?? 160, rearmPx: c.ui.flick_rearm_px ?? 50 })
+      })
+      .catch(() => {})
   }, [id])
-
-  // Refresh suggestions after every spoken message (and on load).
-  useEffect(() => {
-    let cancelled = false
-    const done = (phrases: string[]) => !cancelled && setPrediction({ id, spoken, phrases })
-    predict(id, [...spoken].reverse())
-      .then((r) => done(r.phrases))
-      .catch(() => done([]))
-    return () => {
-      cancelled = true
-    }
-  }, [id, spoken])
 
   useEffect(() => {
     const s = connect(
       `/ws/patient/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       (ev) => {
-        if (ev.type === 'command') dispatchRef.current(ev.command)
+        if (ev.type === 'command') run({ type: 'command', command: ev.command })
         else if (ev.type === 'reliability') {
           setMode(ev.mode)
           setMapping(ev.mapping as Record<string, string>)
         } else if (ev.type === 'mode_change') {
           setMode(ev.to)
           setModeChange(ev)
-        } else if (ev.type === 'boards_updated') setBoards(ev.boards)
+        }
       },
       setConnected,
     )
     sock.current = s
     return () => s.close()
-  }, [id, token])
+  }, [id, run])
+
+  // Sound stays blocked until the first click or key press on this page (see tts.unlock).
+  const [soundReady, setSoundReady] = useState(() => navigator.userActivation?.hasBeenActive ?? true)
+  useEffect(() => {
+    if (soundReady) return
+    const ready = () => {
+      unlock()
+      setSoundReady(true)
+    }
+    window.addEventListener('pointerdown', ready, { once: true })
+    window.addEventListener('keydown', ready, { once: true })
+    return () => {
+      window.removeEventListener('pointerdown', ready)
+      window.removeEventListener('keydown', ready)
+    }
+  }, [soundReady])
+
+  // A mode switch keeps the half-built message and restarts the scan at the first target.
+  useEffect(() => {
+    run({ type: 'mode' })
+  }, [mode, run])
+
+  const scanning = mode === 'scan' || machine.phase === 'spell'
+  useEffect(() => {
+    if (!scanning) return
+    const t = setInterval(() => run({ type: 'tick' }), scanMs)
+    return () => clearInterval(t)
+  }, [scanning, scanMs, run, tickEpoch])
+
+  useEffect(() => writeFlag('relay_aid', aidOn), [aidOn])
+  useEffect(() => writeFlag('relay_flick', flickOn), [flickOn])
 
   useEffect(
     () =>
-      attachKeyboardSim(dispatch, () => {
-        const next = mode === 'split' ? 'scan' : 'split'
-        if (connected) sock.current?.send({ type: 'set_mode', mode: next })
-        else {
-          setModeChange({ type: 'mode_change', from: mode, to: next, reason: `Switching to ${next} mode.` })
-          setMode(next)
-        }
+      attachKeyboardSim((command) => run({ type: 'command', command }), {
+        mode: () => {
+          const next: Mode = mode === 'wheel' ? 'scan' : 'wheel'
+          if (connected) sock.current?.send({ type: 'set_mode', mode: next })
+          else {
+            setModeChange({ type: 'mode_change', from: mode, to: next, reason: `Switching to ${next} mode.` })
+            setMode(next)
+          }
+        },
+        flick: () => setFlickOn((on) => !on),
+        aid: () => setAidOn((on) => !on),
       }),
-    [dispatch, mode, connected],
+    [mode, connected, run],
   )
 
-  const allBoards = [...boards, SPELL_BOARD]
-  const board = allBoards.find((b) => b.id === boardId)
-  const topLevel = [...predictions.map((p) => PREDICTION_MARK + p), ...allBoards.map((b) => b.title)]
-  const baseItems = board ? board.items : topLevel
-  const items = mode === 'scan' ? [...baseItems, SCAN_BACK, SCAN_HELP] : baseItems
-
-  const say = (text: string) => {
-    // Confirmed selection — the only place TTS fires.
-    speak(text)
-    setSpoken((s) => [text, ...s].slice(0, 5))
-    sock.current?.send({ type: 'spoken', text, ts: Date.now() })
-  }
-
-  const onSelect = (item: string) => {
-    if (item === SCAN_HELP) return help()
-    if (item === SCAN_BACK) return setBoardId(null)
-    if (board?.id === SPELL_BOARD.id) {
-      if (item === SPELL_SPEAK) {
-        if (spelled.trim()) say(spelled.trim())
-        setSpelled('')
-        setBoardId(null)
-      } else if (item === SPELL_DELETE) setSpelled((t) => t.slice(0, -1))
-      else if (item === SPELL_SPACE) setSpelled((t) => t + ' ')
-      else setSpelled((t) => t + item)
-      return
+  // Mouse-flick sim: a quick move away from the screen centre = one look.
+  useEffect(() => {
+    if (!flickOn) return
+    const detector = new FlickDetector(flickCfg)
+    const onMove = (e: PointerEvent) => {
+      const dir = detector.move(e.clientX - window.innerWidth / 2, e.clientY - window.innerHeight / 2)
+      if (dir) run({ type: 'command', command: LOOK_COMMANDS[dir] })
     }
-    if (!board) {
-      if (item.startsWith(PREDICTION_MARK)) return say(item.slice(PREDICTION_MARK.length))
-      setBoardId(allBoards.find((b) => b.title === item)?.id ?? null)
-      return
-    }
-    say(item)
-    setBoardId(null)
-  }
+    window.addEventListener('pointermove', onMove)
+    return () => window.removeEventListener('pointermove', onMove)
+  }, [flickOn, flickCfg, run])
 
-  // Split mode shows LEFT/RIGHT on the halves themselves; the header lists the rest.
-  const controls = [['Select', mapping.SELECT], ['HELP', mapping.HELP]]
+  const v = view(WHEEL, machine.path)
+  const last = machine.path.at(-1)
+  const centreWord = v.picked === 'centre' ? last!.node.word : ctx.suggestFor(machine.path)
+  const scanTargets = targets(machine, ctx)
+  const highlight = mode === 'scan' && machine.phase === 'wheel' ? (scanTargets[machine.scanIndex] as Target) : null
+  const extras = mode === 'scan' ? (scanTargets.filter((t) => t === 'finish' || t === 'help') as Target[]) : []
+  const crumb = ['Home', ...machine.path.map((p) => p.node.word)].join(' › ')
+  const controls = [
+    ['Finish', mapping.SELECT],
+    ['Accept', mapping.ACCEPT],
+    ['HELP', mapping.HELP],
+  ].filter(([, g]) => g)
 
   return (
     <main className="patient">
       <header>
-        <span>{board ? board.title : 'Home'}</span>
+        <span>{crumb}</span>
         <span className="status">
-          {controls
-            .filter(([, g]) => g)
-            .map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`)
-            .join(' · ')}
-          {' · '}
-          {mode} · {connected ? 'online' : 'offline'}
-          {' · '}
-          {token ? 'Paired' : <>Not paired · open <Link to="/pair">/pair</Link></>}
+          {controls.map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`).join(' · ')}
+          {controls.length ? ' · ' : ''}
+          {mode} · aid {aidOn ? 'on' : 'off'} · {flickOn ? 'mouse flick on · ' : ''}
+          {connected ? 'online' : 'offline'}
         </span>
       </header>
+      {!soundReady && (
+        <div role="status" style={{ background: '#b45309', color: '#fff', padding: '8px 16px', textAlign: 'center' }}>
+          Sound is off. Click anywhere or press a key once to turn it on.
+        </div>
+      )}
       <ModeBanner change={modeChange} />
-      {!board && predicting && !predictions.length && <PredictionStrip phrases={[]} loading />}
-      {board?.id === SPELL_BOARD.id && <LetterBoard text={spelled} />}
-      {mode === 'split' ? (
-        <SplitBoard
-          items={items}
-          command={command}
-          onSelect={onSelect}
-          leftHint={mapping.LEFT ? GESTURE_LABELS[mapping.LEFT] ?? mapping.LEFT : 'left arrow'}
-          rightHint={mapping.RIGHT ? GESTURE_LABELS[mapping.RIGHT] ?? mapping.RIGHT : 'right arrow'}
-        />
+      {machine.phase === 'spell' ? (
+        <>
+          <LetterBoard text={machine.spelled} />
+          <LetterGrid items={SPELL_ITEMS} active={machine.scanIndex} />
+        </>
       ) : (
-        <ScanBoard items={items} command={command} onSelect={onSelect} intervalMs={scanMs} />
+        <RadialWheel view={v} suggestion={centreWord} highlight={highlight} extras={extras} intervalMs={scanMs} />
+      )}
+      {machine.phase === 'readback' && machine.readback && (
+        <div className="readback" role="dialog" aria-live="assertive">
+          <div className="sentence">
+            {machine.readback.kind === 'word' ? `“${machine.readback.text}”?` : machine.readback.text}
+          </div>
+          {mode === 'scan' ? (
+            <div className="choices">
+              {[machine.readback.kind === 'help' ? '🚨 Send HELP' : '🔊 Speak', '✕ Cancel'].map((label, i) => (
+                <div key={label} className={`item${machine.scanIndex === i ? ' active' : ''}`}>
+                  {label}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="hint">
+              {machine.readback.kind === 'word' ? 'To save this word' : machine.readback.kind === 'help' ? 'To send HELP' : 'To speak'}: {GESTURE_LABELS[mapping.SELECT] ?? 'select'} · look to cancel
+            </div>
+          )}
+        </div>
       )}
       {spoken[0] && <footer>Said: “{spoken[0]}”</footer>}
       {helpActive && (
-        <div className="help-overlay" onClick={() => setHelpActive(false)}>HELP sent to caregiver</div>
+        <div className="help-overlay" onClick={() => setHelpActive(false)}>
+          HELP sent to caregiver
+        </div>
       )}
     </main>
   )

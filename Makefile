@@ -1,4 +1,4 @@
-.PHONY: gates setup backend signal signal-hw plot calibrate frontend frontend-https test demo-check
+.PHONY: gates setup backend signal signal-keyboard signal-hw plot calibrate calibrate-cue frontend frontend-https test demo-check
 
 setup:
 	cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -11,6 +11,10 @@ backend:
 signal:
 	cd signal && .venv/bin/python run.py --source synthetic
 
+# Keyboard demo: no scripted gestures reach the wheel, but /demo degrade still drops reliability.
+signal-keyboard:
+	cd signal && .venv/bin/python run.py --source synthetic --script quiet
+
 # Hardware: make signal-hw PORT=/dev/tty.usbmodem1101  (find it with: ls /dev/tty.usb*)
 signal-hw:
 	cd signal && .venv/bin/python run.py --source arduino --port $(PORT)
@@ -22,6 +26,10 @@ plot:
 # Guided calibration (~3 min) with PORT; instant synthetic dry run without
 calibrate:
 	cd signal && .venv/bin/python calibration.py $(if $(PORT),--source serial --port $(PORT),)
+
+# Cue-driven calibration on the /calibrate page (dot + voice): make calibrate-cue PORT=/dev/cu.usbmodem1101
+calibrate-cue:
+	cd signal && .venv/bin/python calibration.py --source serial --port $(PORT) --cue
 
 frontend:
 	cd frontend && npm run dev

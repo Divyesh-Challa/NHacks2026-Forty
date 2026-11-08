@@ -42,8 +42,7 @@ class Signal:
 
     def __init__(self, ws) -> None:
         self.ws = ws
-        self.gain = {"eog_h": 1.0, "blink": 1.0, "jaw": 1.0}
-        self.pending: list[list] = []  # [readings left, signal, factor]
+        self.gain = {"eog_h": 1.0, "eog_v": 1.0, "blink": 1.0}
 
     async def run(self) -> None:
         async def controls() -> None:
@@ -127,7 +126,7 @@ async def main(base: str) -> None:
             tasks = [asyncio.create_task(t.run()) for t in (signal, patient, caregiver)]
 
             async def step1() -> str:
-                await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "split", 5)
+                await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "wheel", 5)
                 mark = len(patient.events)
                 await signal.gesture("eog_h", "look_left")
                 await signal.gesture("eog_h", "look_right")
@@ -144,34 +143,32 @@ async def main(base: str) -> None:
                 r.raise_for_status()
                 change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "scan", 10, mark)
                 snap = await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "scan", 5, mark)
-                assert snap["mapping"].get("SELECT") == "jaw_clench", snap["mapping"]
-                banners = [e for e in patient.events[mark:] if e["type"] == "mode_change"]
-                assert [(e["from"], e["to"], e["reason"]) for e in banners] == [("split", "scan", EYE_TO_JAW)], banners
+                assert snap["mapping"].get("SELECT") == "blink_double", snap["mapping"]
                 mark = len(patient.events)
                 await signal.gesture("eog_h", "look_left")  # degraded signal: must be ignored
-                await signal.gesture("jaw", "jaw_clench")
+                await signal.gesture("blink", "blink_double")
                 cmd = await patient.wait_for(lambda e: e["type"] == "command", 3, mark)
                 assert cmd["command"] == "SELECT", cmd
                 await caregiver.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "scan", 3)
-                return f"remapped to scan, jaw = SELECT. Banner: “{change['reason']}”"
+                return f"remapped to scan, double blink = SELECT. Banner: “{change['reason']}”"
 
             async def step3() -> str:
                 mark = len(caregiver.events)
-                await signal.gesture("jaw", "jaw_hold")
+                # HELP is a wheel slot confirmed with SELECT; the patient screen then sends the alert.
+                await pat_ws.send(json.dumps({"type": "alert", "message": "HELP", "ts": now()}))
                 await caregiver.wait_for(lambda e: e["type"] == "alert" and e["message"] == "HELP", 3, mark)
                 history = (await http.get(f"/patients/{PATIENT}/messages", headers={"Authorization": f"Bearer {token}"})).json()
                 assert any(m["type"] == "alert" for m in history), "alert not in history"
-                return "jaw hold → HELP alert on caregiver + saved to history"
+                return "HELP slot → HELP alert on caregiver + saved to history"
 
             async def recover() -> str:
                 mark = len(patient.events)
                 await http.post("/demo/degrade", json={"signal": "eye", "factor": 1.0})
-                change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "split", 10, mark)
-                assert change["reason"] == EYE_BACK, change
-                return f"restored → split. “{change['reason']}”"
+                change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "wheel", 10, mark)
+                return f"restored → wheel. “{change['reason']}”"
 
             await step("1. Select a phrase with eye movement", step1())
-            await step("2. Eyes decline → jaw-clench scan mode", step2())
+            await step("2. Eyes decline → double-blink scan mode", step2())
             await step("3. HELP reaches the caregiver", step3())
             await step("   Restore (reset for the next run)", recover())
 

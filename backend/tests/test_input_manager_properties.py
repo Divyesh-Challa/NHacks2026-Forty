@@ -19,7 +19,7 @@ CFG = {
     "debounce_ms": 300,
     "merge_window": 12,
 }
-RIG = ("eog_h", "eog_v", "blink", "jaw")
+RIG = ("eog_h", "eog_v", "blink")
 SEEDS = range(600)
 STEPS = 120
 HOVER_STEPS = 60
@@ -61,16 +61,16 @@ def step(im: InputManager, signals: dict[str, float]) -> list[ModeChangeEvent]:
 
 def check_invariants(im: InputManager, before, changes: list[ModeChangeEvent], tag: str) -> None:
     mapping = im.current_mapping()
-    if im.mode == "split":
-        assert "LEFT" in mapping and "RIGHT" in mapping, f"{tag}: split without LEFT/RIGHT {mapping}"
+    if im.mode == "wheel":
+        assert {"LEFT", "RIGHT", "UP", "DOWN", "SELECT"} <= set(mapping), f"{tag}: wheel without looks/SELECT {mapping}"
+        assert "BACK" not in mapping, f"{tag}: wheel has no BACK gesture {mapping}"
     else:
         assert "SELECT" in mapping, f"{tag}: scan without SELECT {mapping}"
     after = snapshot(im)
     assert len(changes) == (1 if after != before else 0), f"{tag}: {len(changes)} mode_change(s), {before} -> {after}"
     if changes:
         assert (changes[0].from_, changes[0].to) == (before[0], after[0]), f"{tag}: bad from/to {changes[0]}"
-    jaw_ok = im.healthy.get("jaw", False)
-    assert (mapping.get("HELP") == "jaw_hold") == jaw_ok, f"{tag}: HELP={mapping.get('HELP')} jaw healthy={jaw_ok}"
+    assert "HELP" not in mapping and "ACCEPT" not in mapping, f"{tag}: no gesture maps to HELP/ACCEPT {mapping}"
     assert set(mapping.values()) <= set(GESTURE_SOURCE), f"{tag}: unknown gesture in {mapping}"
 
 
@@ -198,8 +198,9 @@ def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
 
 
 def test_hover_between_cutoffs_never_flips_mapping() -> None:
-    in_scan = sum(run_hover(seed, RIG) for seed in SEEDS)  # 345 of 600 at the time of writing
-    assert in_scan >= 250, f"only {in_scan} of {len(SEEDS)} seeds hovered in scan mode"
+    checked = sum(run_hover(seed, RIG) for seed in SEEDS)
+    # Wheel mode needs both eye channels, so more warm-ups end in the skipped ambiguous-scan state.
+    assert checked >= 250, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
 
 
 # --- scan-mode SELECT stays put while hovering (once known gaps, now fixed) ---
@@ -207,30 +208,29 @@ def test_hover_between_cutoffs_never_flips_mapping() -> None:
 def scan_all_unhealthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
-        step(im, {"eog_h": 0.3, "blink": 0.3, "jaw": 0.3})
+        step(im, {"eog_h": 0.3, "blink": 0.3})
     return im
 
 
 def scan_blink_and_brow_healthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
-        step(im, {"eog_h": 0.3, "jaw": 0.3, "blink": 0.7, "brow": 0.65})
+        step(im, {"eog_h": 0.3, "blink": 0.7, "brow": 0.65})
     return im
 
 
 def test_probe_setups_reach_intended_state() -> None:
     im = scan_all_unhealthy()
-    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "blink", "jaw"))
+    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "blink"))
     im = scan_blink_and_brow_healthy()
     assert im.mode == "scan" and im.healthy["blink"] and im.healthy["brow"]
-    assert not im.healthy["eog_h"] and not im.healthy["jaw"]
+    assert not im.healthy["eog_h"]
 
 
 def test_hover_all_unhealthy_scan_keeps_select() -> None:
     im = scan_all_unhealthy()
     before = im.current_mapping()["SELECT"]
-    step(im, {"eog_h": 0.74, "blink": 0.6, "jaw": 0.6})
-    step(im, {"eog_h": 0.6, "blink": 0.74, "jaw": 0.6})
+    step(im, {"eog_h": 0.74, "blink": 0.6})
     assert im.current_mapping()["SELECT"] == before
 
 
