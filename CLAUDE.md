@@ -159,7 +159,7 @@ Backend → signal service (`/ws/signal`) sends `{"type": "degrade", "signal": "
 
 ### Input manager (the differentiator — make this solid and tested)
 - Rank signals by reliability. Choose mode: split if ≥2 gestures with `r ≥ 0.6`, else scan.
-- Preferred mappings (first that qualifies): `look_left/look_right` → `LEFT/RIGHT`; else `blink_double` → `LEFT`, `jaw_clench` → `RIGHT`. Scan mode: best single gesture → `SELECT`.
+- Preferred mappings (first that qualifies): `look_left/look_right` → `LEFT/RIGHT`; else `blink_double` → `LEFT`, `jaw_clench` → `RIGHT`. Scan mode: best single gesture → `SELECT`, kept until its signal becomes unreliable (no flapping).
 - **Remap rule:** a mapped signal below 0.6 for its last 10 attempts triggers remap + `mode_change` event with a human-readable reason.
 - **Hysteresis:** switch back only if the signal stays ≥ 0.75 for 20 attempts. No flapping.
 - HELP requires hold-to-confirm. Debounce all commands (ignore duplicates within ~300 ms).
