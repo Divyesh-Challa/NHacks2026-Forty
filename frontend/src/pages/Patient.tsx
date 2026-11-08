@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { LetterBoard, LetterGrid } from '../components/LetterBoard'
 import { ModeBanner } from '../components/ModeBanner'
-import { RadialWheel } from '../components/RadialWheel'
+import { RadialWheel, ScanTimer } from '../components/RadialWheel'
 import { getConfig } from '../lib/api'
 import { FlickDetector } from '../lib/flickSim'
 import { attachKeyboardSim } from '../lib/keyboardSim'
@@ -21,6 +21,7 @@ import { WHEEL } from '../lib/wheelTree'
 import { learn, loadWords, saveWords, suggest } from '../lib/words'
 import type { WordLink } from '../lib/words'
 import { connect, type RelaySocket } from '../lib/ws'
+import './patient.css'
 
 const GESTURE_LABELS: Record<string, string> = {
   look_left: 'look left',
@@ -206,64 +207,121 @@ export default function Patient() {
   const scanTargets = targets(machine, ctx)
   const highlight = mode === 'scan' && machine.phase === 'wheel' ? (scanTargets[machine.scanIndex] as Target) : null
   const extras = mode === 'scan' ? (scanTargets.filter((t) => t === 'finish' || t === 'help') as Target[]) : []
-  const crumb = ['Home', ...machine.path.map((p) => p.node.word)].join(' › ')
-  const controls = [
+  const spelling = machine.phase === 'spell'
+  const title = spelling ? 'Spell a word' : (last?.node.word ?? 'Home')
+  const crumb = spelling
+    ? 'Pick letters, then Speak to finish'
+    : machine.path.length
+      ? ['Home', ...machine.path.map((p) => p.node.word)].join(' › ')
+      : mode === 'scan'
+        ? 'Select when the option you want is lit'
+        : 'Look up, right, down or left to choose'
+  // Which gesture does what. Without a live mapping (keyboard sim, backend offline) show the keys instead.
+  const mapped = [
     ['Finish', mapping.SELECT],
     ['Accept', mapping.ACCEPT],
     ['HELP', mapping.HELP],
   ].filter(([, g]) => g)
+  const controls = mapped.length
+    ? mapped.map(([label, g]) => [label, GESTURE_LABELS[g!] ?? g!])
+    : [
+        ['Finish', 'Space'],
+        ['Accept', 'B'],
+        ['HELP', 'hold H'],
+      ]
+  const selectHint = GESTURE_LABELS[mapping.SELECT] ?? 'Space'
+  const acceptHint = GESTURE_LABELS[mapping.ACCEPT] ?? 'double blink'
+  const rb = machine.readback
 
   return (
     <main className="patient">
-      <header>
-        <span>{crumb}</span>
-        <span className="status">
-          {controls.map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`).join(' · ')}
-          {controls.length ? ' · ' : ''}
-          {mode} · aid {aidOn ? 'on' : 'off'} · {flickOn ? 'mouse flick on · ' : ''}
-          {connected ? 'online' : 'offline'} · {token ? 'Paired' : <>Not paired · open <Link to="/pair">/pair</Link></>}
-        </span>
+      <header className="pt-head">
+        <div className="pt-brand">
+          <span className="pt-mark" aria-hidden="true">R</span>
+          <span className="pt-name">Relay</span>
+        </div>
+        <div className="pt-title">
+          <h1>{title}</h1>
+          <p>{crumb}</p>
+        </div>
+        <ul className="pt-controls" aria-label="Controls">
+          {controls.map(([label, g]) => (
+            <li key={label}>
+              <span className="k">{label}</span>
+              <span className="v">{g}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="pt-status">
+          <span className={`pt-live ${connected ? 'on' : 'off'}`}>
+            <span className="dot" aria-hidden="true" />
+            {connected ? 'Online' : 'Offline'} · {mode === 'wheel' ? 'Wheel' : 'Scan'} mode
+          </span>
+          <span className="pt-sub">
+            {token ? 'Paired' : <>Not paired · <Link to="/pair">pair this device</Link></>} · Voice aid {aidOn ? 'on' : 'off'}
+            {flickOn ? ' · Mouse flick on' : ''}
+          </span>
+        </div>
       </header>
       {!soundReady && (
-        <div role="status" style={{ background: '#b45309', color: '#fff', padding: '8px 16px', textAlign: 'center' }}>
+        <div className="pt-notice warn" role="status">
           Sound is off. Click anywhere or press a key once to turn it on.
         </div>
       )}
-      <ModeBanner change={modeChange} />
-      {machine.phase === 'spell' ? (
-        <>
-          <LetterBoard text={machine.spelled} />
-          <LetterGrid items={SPELL_ITEMS} active={machine.scanIndex} />
-        </>
-      ) : (
-        <RadialWheel view={v} suggestion={centreWord} highlight={highlight} extras={extras} intervalMs={scanMs} />
+      {!connected && (
+        <div className="pt-notice late" role="status">
+          Not connected to Relay. The keyboard still works, but signals and caregiver alerts will not arrive until it reconnects.
+        </div>
       )}
-      {machine.phase === 'readback' && machine.readback && (
-        <div className="readback" role="dialog" aria-live="assertive">
-          <div className="sentence">
-            {machine.readback.kind === 'word' ? `“${machine.readback.text}”?` : machine.readback.text}
-          </div>
+      <ModeBanner change={modeChange} />
+      {spelling ? (
+        <div className="spell">
+          <LetterBoard text={machine.spelled} />
+          <LetterGrid items={SPELL_ITEMS} active={machine.scanIndex} intervalMs={scanMs} epoch={tickEpoch} />
+        </div>
+      ) : (
+        <RadialWheel view={v} suggestion={centreWord} highlight={highlight} extras={extras} intervalMs={scanMs} epoch={tickEpoch} acceptHint={acceptHint} />
+      )}
+      {machine.phase === 'readback' && rb && (
+        <div className="readback" role="dialog" aria-live="assertive" aria-label="Confirm">
+          <div className="rb-ask">{rb.kind === 'help' ? 'Send an alert?' : rb.kind === 'word' ? 'Save this word?' : 'Speak this aloud?'}</div>
+          <div className="sentence">{rb.kind === 'word' ? `“${rb.text}”` : rb.text}</div>
           {mode === 'scan' ? (
             <div className="choices">
-              {[machine.readback.kind === 'help' ? '🚨 Send HELP' : '🔊 Speak', '✕ Cancel'].map((label, i) => (
-                <div key={label} className={`item${machine.scanIndex === i ? ' active' : ''}`}>
+              {[rb.kind === 'help' ? 'Send HELP' : rb.kind === 'word' ? 'Save word' : 'Speak', 'Cancel'].map((label, i) => (
+                <div key={label} className={`choice${i === 0 ? ' go' : ''}${rb.kind === 'help' && i === 0 ? ' help' : ''}${machine.scanIndex === i ? ' active' : ''}`}>
                   {label}
+                  {machine.scanIndex === i && <ScanTimer ms={scanMs} epoch={tickEpoch} />}
                 </div>
               ))}
             </div>
           ) : (
             <div className="hint">
-              {machine.readback.kind === 'word' ? 'To save this word' : machine.readback.kind === 'help' ? 'To send HELP' : 'To speak'}: {GESTURE_LABELS[mapping.SELECT] ?? 'select'} · look to cancel
+              <span className="pt-keys">
+                <kbd>{selectHint}</kbd> {rb.kind === 'word' ? 'to save this word' : rb.kind === 'help' ? 'to send HELP' : 'to speak'}
+              </span>
+              <span className="pt-keys">
+                <kbd>look any way</kbd> to cancel
+              </span>
             </div>
           )}
         </div>
       )}
-      {spoken[0] && <footer>Said: “{spoken[0]}”</footer>}
+      <footer className="pt-said" aria-live="polite">
+        <span className="k">Said</span>
+        {spoken[0] ? <q>{spoken[0]}</q> : <span className="none">Spoken phrases appear here</span>}
+      </footer>
       {helpActive && (
-        <div className="help-overlay" onClick={() => setHelpActive(false)}>
-          HELP sent to caregiver
+        <div className={`help-overlay${connected ? '' : ' unsent'}`} role="alertdialog" aria-label="HELP" onClick={() => setHelpActive(false)}>
+          <span className="ring" aria-hidden="true" />
+          <div className="big">{connected ? 'HELP sent' : 'HELP not sent'}</div>
+          <div className="sub">
+            {connected ? 'Your caregiver has been alerted.' : 'Relay is offline, so no one was alerted. Call out or use the call bell.'}
+          </div>
+          <div className="dismiss">Click anywhere to dismiss</div>
         </div>
       )}
     </main>
   )
 }
+

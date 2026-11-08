@@ -16,8 +16,15 @@ export function ModeBanner({ change }: { change: ModeChangeEvent | null }) {
 
   if (!change || hiddenFor === change) return null
   return (
-    <div className="banner" role="status">
-      {change.reason}
+    <div className="mode-banner" role="status">
+      <span className="mb-mark" aria-hidden="true" />
+      <div className="mb-text">
+        <strong>{change.to === 'scan' ? 'Switching to scan mode' : 'Back to wheel mode'}</strong>
+        <span>{change.reason}</span>
+      </div>
+      <button type="button" className="mb-close" onClick={() => setHiddenFor(change)}>
+        Dismiss
+      </button>
     </div>
   )
 }

@@ -1,10 +1,17 @@
 // Spelling: LetterBoard shows the word being built; LetterGrid shows the letters the scan steps through.
-export function LetterGrid({ items, active }: { items: string[]; active: number }) {
+import { ScanTimer } from './RadialWheel'
+
+// Items that start with a symbol (speak, delete, space) are actions, not letters; show them as words.
+const isAction = (item: string) => /^[^\p{L}]/u.test(item)
+const labelOf = (item: string) => item.replace(/^[^\p{L}]+/u, '')
+
+export function LetterGrid({ items, active, intervalMs, epoch }: { items: string[]; active: number; intervalMs: number; epoch: number }) {
   return (
-    <div className="scan letters">
+    <div className="letters">
       {items.map((item, i) => (
-        <div key={item} className={`item${i === active ? ' active' : ''}`}>
-          {item}
+        <div key={item} className={`letter${isAction(item) ? ' action' : ''}${i === active ? ' active' : ''}`}>
+          {labelOf(item)}
+          {i === active && <ScanTimer ms={intervalMs} epoch={epoch} />}
         </div>
       ))}
     </div>
@@ -14,7 +21,7 @@ export function LetterGrid({ items, active }: { items: string[]; active: number 
 export function LetterBoard({ text }: { text: string }) {
   return (
     <div className="letter-buffer" aria-live="polite">
-      {text || <span className="muted">Spell a word…</span>}
+      {text ? <span className="typed">{text}</span> : <span className="muted">Spell a word…</span>}
       <span className="caret" />
     </div>
   )
