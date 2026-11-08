@@ -60,7 +60,7 @@ export function RadialWheel({
                 {!scanning && node && <span className="hint">{view.kept === d ? `${HINTS[d]} to go back` : HINTS[d]}</span>}
               </span>
               <span className="word">{node?.word ?? ''}</span>
-              {view.kept === d && <span className="back-tag">Back</span>}
+              {view.kept === d && scanning && <span className="back-tag">Back</span>}
               {highlight === d && <ScanTimer ms={intervalMs} epoch={epoch} />}
             </div>
           )
@@ -70,11 +70,17 @@ export function RadialWheel({
             .filter(Boolean)
             .join(' ')}
         >
-          {suggestion && (
+          {suggestion ? (
             <span className="cue">
               <span className="tag">Suggested</span>
               {!scanning && <span className="hint">{acceptHint} to accept</span>}
             </span>
+          ) : (
+            !scanning && (
+              <span className="cue">
+                <span className="hint">Words you spell appear here</span>
+              </span>
+            )
           )}
           <span className="word">{suggestion ?? ''}</span>
           {highlight === 'centre' && <ScanTimer ms={intervalMs} epoch={epoch} />}

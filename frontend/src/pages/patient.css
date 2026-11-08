@@ -1,6 +1,8 @@
 /* Patient screen (/patient/:id). Same product identity as the /demo console: true-black ground, cards one
    lightness step up, no borders or shadows on cards, brand yellow as the one hue, red only for HELP.
    AAC first: very large targets, strong contrast, the lit item unmistakable, no time pressure in wheel mode. */
+/* Everything is in rem: on a 1080p recording or a projector the whole screen scales up with the width. */
+:root:has(.patient) { font-size: clamp(16px, 1.25vw, 28px); }
 .patient {
   --p-card: #15171a;
   --p-nested: #23262b;
@@ -105,11 +107,12 @@
   background: var(--p-card);
   border-radius: 22px;
   text-align: center;
-  transition: background-color 0.15s, color 0.15s, transform 0.15s;
+  transition: transform 0.15s;
 }
 .slot.up { grid-area: up; } .slot.right { grid-area: right; } .slot.down { grid-area: down; } .slot.left { grid-area: left; } .slot.centre { grid-area: centre; }
 .slot .cue { display: flex; align-items: center; gap: 10px; color: var(--p-dim); font-size: 1.15rem; font-weight: 600; }
-.slot .arrow { flex: none; color: var(--p-accent); transition: transform 0.15s; }
+.slot .arrow { flex: none; color: var(--p-accent); }
+.slot.centre.empty .hint { color: var(--p-meta); font-weight: 500; }
 .slot .word { font-size: clamp(1.4rem, min(3.4vw, 6vh), 3.25rem); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
 .slot .back-tag { color: var(--p-accent); font-size: 1.1rem; font-weight: 700; }
 .slot.kept .word { color: var(--p-accent); }
@@ -127,7 +130,7 @@
 .scan-timer { position: absolute; left: 0; bottom: 0; height: 10px; background: rgba(0, 0, 0, 0.5); animation: pt-scan linear forwards; }
 @keyframes pt-scan { from { width: 0; } to { width: 100%; } }
 
-.wheel-extras { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.wheel-extras { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 12px; }
 .extra { position: relative; overflow: hidden; display: grid; place-items: center; min-height: 72px; background: var(--p-card); border-radius: 18px; font-size: 2rem; font-weight: 800; }
 .extra.help { color: var(--p-neg); }
 .extra.active { background: var(--p-accent); color: #000; outline: 5px solid #fff; outline-offset: 3px; }
@@ -140,7 +143,7 @@
 .caret { display: inline-block; width: 4px; height: 1em; background: var(--p-accent); margin-left: 6px; animation: pt-caret 1s steps(1) infinite; }
 @keyframes pt-caret { 50% { opacity: 0; } }
 .letters { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); grid-auto-rows: minmax(64px, 1fr); gap: 10px; min-height: 0; }
-.letter { position: relative; overflow: hidden; display: grid; place-items: center; background: var(--p-card); border-radius: 16px; font-size: 2.2rem; font-weight: 800; transition: background-color 0.15s, color 0.15s; }
+.letter { position: relative; overflow: hidden; display: grid; place-items: center; background: var(--p-card); border-radius: 16px; font-size: 2.2rem; font-weight: 800; }
 .letter.action { grid-column: span 2; background: var(--p-nested); font-size: 1.6rem; }
 .letter.active { background: var(--p-accent); color: #000; outline: 5px solid #fff; outline-offset: 3px; z-index: 1; }
 
@@ -195,7 +198,7 @@
   .wheel { min-height: 420px; gap: 8px; grid-template-columns: 1fr 1.25fr 1fr; }
   .slot { padding: 8px 6px; border-radius: 16px; }
   .slot .cue .hint { display: none; }
-  .slot .word { font-size: clamp(1rem, 4.6vw, 1.6rem); }
+  .slot .word { font-size: clamp(1.1rem, 5vw, 1.7rem); }
   .mode-banner { grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 14px 16px; }
   .mb-close { display: none; }
   .mb-text strong { font-size: 1.25rem; }
