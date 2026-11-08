@@ -2,13 +2,14 @@
 // All behaviour lives in lib/wheelMachine.ts; this page feeds it commands and ticks, then carries out
 // the effects it returns (aid voice, real speech, learned words, HELP).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { LetterBoard, LetterGrid } from '../components/LetterBoard'
 import { ModeBanner } from '../components/ModeBanner'
 import { RadialWheel } from '../components/RadialWheel'
 import { getConfig } from '../lib/api'
 import { FlickDetector } from '../lib/flickSim'
 import { attachKeyboardSim } from '../lib/keyboardSim'
+import { pairedToken } from '../lib/pairing'
 import { SPELL_ITEMS } from '../lib/spell'
 import { aid, speak, unlock } from '../lib/tts'
 import type { Command, Mode, ModeChangeEvent } from '../lib/types'
@@ -63,6 +64,8 @@ export default function Patient() {
   const [connected, setConnected] = useState(false)
   const [tickEpoch, setTickEpoch] = useState(0)
   const sock = useRef<RelaySocket | null>(null)
+  // The stage demo runs unpaired: with no token the WS simply connects without ?token=.
+  const token = useMemo(() => pairedToken(id), [id])
 
   const ctx: Ctx = useMemo(
     () => ({ root: WHEEL, mode, suggestFor: (p) => suggest(links, keyChain(p), Date.now()) }),
@@ -135,7 +138,7 @@ export default function Patient() {
     )
     sock.current = s
     return () => s.close()
-  }, [id, run])
+  }, [id, run, token])
 
   // Sound stays blocked until the first click or key press on this page (see tts.unlock).
   const [soundReady, setSoundReady] = useState(() => navigator.userActivation?.hasBeenActive ?? true)
@@ -218,7 +221,7 @@ export default function Patient() {
           {controls.map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`).join(' · ')}
           {controls.length ? ' · ' : ''}
           {mode} · aid {aidOn ? 'on' : 'off'} · {flickOn ? 'mouse flick on · ' : ''}
-          {connected ? 'online' : 'offline'}
+          {connected ? 'online' : 'offline'} · {token ? 'Paired' : <>Not paired · open <Link to="/pair">/pair</Link></>}
         </span>
       </header>
       {!soundReady && (
