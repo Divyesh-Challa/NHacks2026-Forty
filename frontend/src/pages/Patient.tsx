@@ -120,7 +120,7 @@ export default function Patient() {
 
   useEffect(() => {
     const s = connect(
-      `/ws/patient/${id}`,
+      `/ws/patient/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       (ev) => {
         if (ev.type === 'command') run({ type: 'command', command: ev.command })
         else if (ev.type === 'reliability') {

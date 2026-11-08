@@ -70,6 +70,10 @@ GESTURE_NAMES = {
 }
 
 
+def _source_order(source: str) -> int:
+    return list(SOURCE_NAMES).index(source) if source in SOURCE_NAMES else len(SOURCE_NAMES)
+
+
 def _join(names: list[str]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
@@ -84,6 +88,11 @@ class InputManager:
     mapping: dict[str, str] = field(default_factory=dict)  # command -> gesture
     _history: dict[str, deque[float]] = field(default_factory=dict)
     _last_emit: dict[str, int] = field(default_factory=dict)  # command -> ts of last emit
+    _readings: int = 0  # reliability events seen: the merge window's clock
+    _held_since: int | None = None  # reading that started a held remap
+    # Health losses/regains not yet named in a banner: source -> reading it happened at.
+    _lost: dict[str, int] = field(default_factory=dict)
+    _regained: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.mode, self.mapping = self._choose()
@@ -104,8 +113,9 @@ class InputManager:
         return out
 
     def on_reliability(self, ev: SignalReliabilityEvent) -> list[ReliabilityEvent | ModeChangeEvent]:
-        """Record readings, update per-signal health, remap if needed."""
+        """Record readings, update per-signal health, remap if needed (possibly held, see docstring)."""
         self.reliability.update(ev.signals)
+        self._readings += 1
         lost: list[str] = []
         regained: list[str] = []
         for source, r in ev.signals.items():
@@ -123,16 +133,42 @@ class InputManager:
                 self.healthy[source] = True
                 regained.append(source)
 
+        # Only changes inside the window can join a banner (a held remap never outlives it).
+        for pending in (self._lost, self._regained):
+            for s in [s for s, at in pending.items() if self._readings - at > self.cfg["merge_window"]]:
+                del pending[s]
+        for s in lost:
+            self._regained.pop(s, None)
+            self._lost[s] = self._readings
+        for s in regained:
+            self._lost.pop(s, None)
+            self._regained[s] = self._readings
+
         out: list[ReliabilityEvent | ModeChangeEvent] = []
-        change = self._apply(self._reason(lost, regained))
-        if change:
-            out.append(change)
+        if self._held_since is None and (lost or regained) and self._would_change() and self._settling():
+            self._held_since = self._readings
+        if self._held_since is not None and self._settling():
+            self._refresh_extras()
+        else:
+            change = self._apply(self._reason())
+            if change:
+                out.append(change)
         out.append(self.snapshot())
         return out
 
+    @property
+    def remap_held(self) -> bool:
+        """A primary remap is waiting for the merge window (the board still shows the old mapping)."""
+        return self._held_since is not None
+
     def force_mode(self, mode: Mode, reason: str | None = None) -> ModeChangeEvent | None:
+        """Manual mode toggle. Asking for the current mode lands a held remap (with its own reason).
+
+        That request leaves `override` alone: pinning the current mode could hold the board on a
+        dead mapping (e.g. split on failed eyes when the held remap is to jaw scan).
+        """
         if mode == self.mode:
-            return None
+            return self._apply(self._reason()) if self.remap_held else None
         self.override = mode
         auto_mode, _ = self._choose(use_override=False)
         if auto_mode == mode:
@@ -175,16 +211,74 @@ class InputManager:
         select = max(candidates, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
         return "scan", {"SELECT": select}
 
+    def _changes_primary(self, mode: Mode, mapping: dict[str, str]) -> bool:
+        return mode != self.mode or any(self.mapping.get(k) != mapping.get(k) for k in PRIMARY)
+
+    def _would_change(self) -> bool:
+        return self._changes_primary(*self._choose())
+
+    def _run(self, source: str, below: bool) -> int:
+        """Length of the source's current run of readings below cutoff (below) or >= recover_cutoff."""
+        n = 0
+        for r in reversed(self._history.get(source, ())):
+            if (r < self.cfg["reliability_cutoff"]) if below else (r >= self.cfg["recover_cutoff"]):
+                n += 1
+            else:
+                break
+        return n
+
+    def _settling(self) -> bool:
+        """Another mapping signal is part-way through a run that can change its health within the window.
+
+        After a loss: a healthy signal with a run below `reliability_cutoff` that can reach
+        `remap_window`. After a regain: an unhealthy signal with a run at/above `recover_cutoff`
+        that can reach `recover_window`. A hover between the cutoffs is no run, so it holds nothing.
+        """
+        start = self._readings if self._held_since is None else self._held_since
+        left = start + self.cfg["merge_window"] - self._readings  # readings still inside the window
+        pending = set(self._lost) | set(self._regained)
+        for s in MAPPING_SOURCES - pending:
+            if self.healthy.get(s, False):
+                k = self._run(s, below=True)
+                if self._lost and k and self.cfg["remap_window"] - k <= left:
+                    return True
+            else:
+                k = self._run(s, below=False)
+                if self._regained and k and self.cfg["recover_window"] - k <= left:
+                    return True
+        return False
+
+    def _refresh_extras(self) -> None:
+        """While a remap is held: keep mode and LEFT/RIGHT/SELECT, let BACK and HELP follow health."""
+        mapping = {k: v for k, v in self.mapping.items() if k in PRIMARY}
+        if self.mode == "split" and self._ok("blink_double") and "blink_double" not in mapping.values():
+            mapping["BACK"] = "blink_double"
+        if self._ok(HELP_GESTURE):
+            mapping["HELP"] = HELP_GESTURE
+        self.mapping = mapping
+
     def _apply(self, reason) -> ModeChangeEvent | None:
-        """Recompute mode/mapping; return a ModeChangeEvent if anything primary changed."""
-        old_mode, old_mapping = self.mode, self.mapping
-        self.mode, self.mapping = self._choose()
-        changed = self.mode != old_mode or any(old_mapping.get(k) != self.mapping.get(k) for k in PRIMARY)
+        """Recompute mode/mapping; return a ModeChangeEvent if anything primary changed.
+
+        Ends any held remap. Pending losses/regains are kept until a banner names them, so a loss
+        that changed nothing primary (e.g. blink while it was only BACK) is named by a remap that
+        follows inside the window.
+        """
+        self._held_since = None
+        mode, mapping = self._choose()
+        changed = self._changes_primary(mode, mapping)
+        old_mode = self.mode
+        self.mode, self.mapping = mode, mapping
         if not changed:
             return None
-        return ModeChangeEvent(from_=old_mode, to=self.mode, reason=reason())
+        event = ModeChangeEvent(from_=old_mode, to=self.mode, reason=reason())
+        self._lost, self._regained = {}, {}
+        return event
 
-    def _reason(self, lost: list[str], regained: list[str]):
+    def _reason(self):
+        lost = sorted(self._lost, key=_source_order)
+        regained = sorted(self._regained, key=_source_order)
+
         def build() -> str:
             select = GESTURE_NAMES[self.mapping["SELECT"]]
             if self.mode == "scan":
@@ -192,13 +286,17 @@ class InputManager:
             else:
                 target = f"eye movement with {select} to finish"
             if lost:
-                cutoff = f"{self.cfg['reliability_cutoff']:.0%}"
-                who = _join([SOURCE_NAMES.get(s, s) for s in lost])
-                return f"{who[0].upper() + who[1:]} reliability fell below {cutoff}. Switching to {target}."
+                fell = f"{_join([SOURCE_NAMES.get(s, s) for s in lost])} reliability fell below "
+                fell += f"{self.cfg['reliability_cutoff']:.0%}"
             if regained:
-                who = _join([SOURCE_NAMES.get(s, s) for s in regained])
-                verb = "is" if len(regained) == 1 else "are"
-                return f"{who[0].upper() + who[1:]} {verb} reliable again. Switching back to {target}."
-            return f"Switching to {target}."
+                back = f"{_join([SOURCE_NAMES.get(s, s) for s in regained])} "
+                back += f"{'is' if len(regained) == 1 else 'are'} reliable again"
+            if fell and back:
+                why, switch = f"{fell} and {back}", "Switching to"
+            elif fell or back:
+                why, switch = fell or back, "Switching to" if fell else "Switching back to"
+            else:
+                return f"Switching to {target}."
+            return f"{why[0].upper() + why[1:]}. {switch} {target}."
 
         return build

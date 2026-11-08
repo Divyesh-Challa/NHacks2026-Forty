@@ -16,6 +16,7 @@ body { margin: 0; min-height: 100vh; }
 .patient { display: flex; flex-direction: column; height: 100vh; padding: 16px; gap: 16px; font-size: 2rem; }
 .patient header { display: flex; justify-content: space-between; font-weight: 700; }
 .patient .status { color: var(--fg); font-size: 1.25rem; opacity: 0.85; }
+.patient .status a { color: inherit; text-decoration: underline; }
 .patient footer { color: var(--muted); }
 
 /* Radial wheel: four fixed directions around a centre suggestion. */

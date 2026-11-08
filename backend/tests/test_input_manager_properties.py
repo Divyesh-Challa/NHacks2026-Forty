@@ -8,7 +8,7 @@ import random
 
 import pytest
 
-from app.input_manager import GESTURE_SOURCE, PRIMARY, SCAN_SELECT, InputManager
+from app.input_manager import GESTURE_SOURCE, MAPPING_SOURCES, PRIMARY, InputManager
 from app.models import ModeChangeEvent, SignalReliabilityEvent
 
 CFG = {
@@ -17,6 +17,7 @@ CFG = {
     "remap_window": 10,
     "recover_window": 20,
     "debounce_ms": 300,
+    "merge_window": 12,
 }
 RIG = ("eog_h", "eog_v", "blink")
 SEEDS = range(600)
@@ -96,10 +97,58 @@ def check_health_rule(prev: dict[str, bool], im: InputManager, hist: dict[str, l
         )
 
 
-@pytest.mark.parametrize("seed", SEEDS)
-def test_random_sequences_keep_invariants(seed: int) -> None:
+def target(im: InputManager) -> tuple[str, dict[str, str | None]]:
+    """Mode and primary controls the current health calls for, i.e. what a held remap will apply."""
+    mode, mapping = im._choose()
+    return mode, {k: mapping.get(k) for k in PRIMARY}
+
+
+def trailing(readings: list[float], pred) -> int:
+    n = 0
+    for r in reversed(readings):
+        if not pred(r):
+            break
+        n += 1
+    return n
+
+
+def run_under_way(im: InputManager, source: str, readings: list[float], left: int) -> bool:
+    """`source` is part-way through a health-changing run that can finish within `left` more readings."""
+    if im.healthy.get(source, False):
+        k = trailing(readings, lambda r: r < CFG["reliability_cutoff"])
+        return k > 0 and CFG["remap_window"] - k <= left
+    k = trailing(readings, lambda r: r >= CFG["recover_cutoff"])
+    return k > 0 and CFG["recover_window"] - k <= left
+
+
+def check_merge_window(im: InputManager, hold_start: int | None, i: int, changes, hist, tag: str) -> int | None:
+    """A remap may lag health only while held; a hold needs a run under way and ends within merge_window.
+
+    Returns the step the current hold started at (None if no remap is held).
+    """
+    lagging = snapshot(im) != target(im)
+    if changes:
+        assert not lagging, f"{tag}: announced {snapshot(im)} but health calls for {target(im)}"
+    if lagging:
+        assert im.remap_held, f"{tag}: mapping {snapshot(im)} lags health {target(im)} without a held remap"
+    if not im.remap_held:
+        return None
+    hold_start = i if hold_start is None else hold_start
+    assert i - hold_start < CFG["merge_window"], f"{tag}: remap held since step {hold_start}"
+    left = hold_start + CFG["merge_window"] - i
+    assert any(run_under_way(im, s, hist.get(s, []), left) for s in MAPPING_SOURCES), (
+        f"{tag}: remap held with no run under way; last readings "
+        f"{ {s: hist.get(s, [])[-5:] for s in MAPPING_SOURCES} } health {im.healthy}"
+    )
+    return hold_start
+
+
+def run_sequence(seed: int) -> bool:
+    """Check every invariant along one random sequence; returns True if a remap was ever held."""
     im = InputManager(cfg=dict(CFG))
     hist: dict[str, list[float]] = {}
+    hold_start: int | None = None
+    held = False
     for i, signals in enumerate(gen_sequence(seed)):
         before = snapshot(im)
         prev = dict(im.healthy)
@@ -109,34 +158,43 @@ def test_random_sequences_keep_invariants(seed: int) -> None:
         tag = f"seed={seed} step={i}"
         check_invariants(im, before, changes, tag)
         check_health_rule(prev, im, hist, signals, tag)
+        hold_start = check_merge_window(im, hold_start, i, changes, hist, tag)
+        held = held or hold_start is not None
+    return held
 
 
-def scan_select_is_ambiguous(im: InputManager) -> bool:
-    """Scan mode picks SELECT by live reliability unless exactly one candidate is healthy (see probes below)."""
-    if im.mode != "scan":
-        return False
-    return sum(im._ok(g) for g in SCAN_SELECT) != 1
+@pytest.mark.parametrize("seed", SEEDS)
+def test_random_sequences_keep_invariants(seed: int) -> None:
+    run_sequence(seed)
+
+
+def test_random_sequences_exercise_the_merge_window() -> None:
+    held = sum(run_sequence(seed) for seed in SEEDS)  # 298 of 600 at the time of writing
+    assert held >= 200, f"only {held} of {len(SEEDS)} seeds held a remap"
 
 
 def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
     """Random warm-up, then every reading in [0.6, 0.75): health cannot change, so neither can the mapping.
 
-    Returns False (and checks nothing) when the warm-up ends in the known-ambiguous scan state.
+    A hover breaks every run, so a remap held at the end of the warm-up lands on the first hover reading.
+    Returns True if the warm-up ended in scan mode, i.e. the hover phase exercised the sticky SELECT.
     """
     rng = random.Random(seed)
     im = InputManager(cfg=dict(CFG))
     for warm in gen_sequence(seed, signals, steps=60):
         step(im, warm)
-    if scan_select_is_ambiguous(im):
-        return False
+    if im.remap_held:
+        step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
+    assert not im.remap_held, f"hover seed={seed}: remap still held after a hover reading"
     frozen = (dict(im.healthy), im.current_mapping(), im.mode)
+    in_scan = im.mode == "scan"
     for i in range(HOVER_STEPS):
         changes = step(im, {s: rng.uniform(0.6, 0.7499) for s in signals})
         assert not changes, f"hover seed={seed} step={i}: unexpected mode_change {changes}"
         assert (dict(im.healthy), im.current_mapping(), im.mode) == frozen, (
             f"hover seed={seed} step={i}: {frozen[:2]} -> {(im.healthy, im.current_mapping())}"
         )
-    return True
+    return in_scan
 
 
 def test_hover_between_cutoffs_never_flips_mapping() -> None:
@@ -145,7 +203,7 @@ def test_hover_between_cutoffs_never_flips_mapping() -> None:
     assert checked >= 250, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
 
 
-# --- known gaps (real findings, app code deliberately untouched) ---
+# --- scan-mode SELECT stays put while hovering (once known gaps, now fixed) ---
 
 def scan_all_unhealthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
@@ -169,7 +227,6 @@ def test_probe_setups_reach_intended_state() -> None:
     assert not im.healthy["eog_h"]
 
 
-@pytest.mark.xfail(strict=True, reason="scan mode with NO healthy candidate falls back to max live reliability, so hovering flips SELECT")
 def test_hover_all_unhealthy_scan_keeps_select() -> None:
     im = scan_all_unhealthy()
     before = im.current_mapping()["SELECT"]
@@ -177,7 +234,6 @@ def test_hover_all_unhealthy_scan_keeps_select() -> None:
     assert im.current_mapping()["SELECT"] == before
 
 
-@pytest.mark.xfail(strict=True, reason="scan mode with 2+ healthy candidates (e.g. blink and brow) re-picks SELECT by live reliability")
 def test_hover_two_healthy_scan_candidates_keeps_select() -> None:
     im = scan_blink_and_brow_healthy()
     before = im.current_mapping()["SELECT"]

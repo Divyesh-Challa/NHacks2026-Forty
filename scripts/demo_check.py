@@ -24,6 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 PATIENT = "p1"
 PASSWORD = "demo-check-password"
 RELIABILITY_HZ = 20  # faster than the real ~1 Hz so the 10-reading remap takes ~0.5 s
+# Readings by which a degrade reaches each signal. The real detectors never lose eog_h and blink on
+# the same reading, so blink trails: the stage banner must still be one split -> scan change.
+LAG = {"blink": 3}
+EYE_TO_JAW = "Eye movement and blinking reliability fell below 60%. Switching to scan mode with jaw clench to select."
+EYE_BACK = "Eye movement and blinking are reliable again. Switching back to eye movement."
 
 
 def free_port() -> int:
@@ -44,11 +49,16 @@ class Signal:
             async for raw in self.ws:
                 msg = json.loads(raw)
                 if msg.get("type") == "degrade":
-                    self.gain[msg["signal"]] = msg["factor"]
+                    self.pending.append([LAG.get(msg["signal"], 0), msg["signal"], msg["factor"]])
 
         task = asyncio.create_task(controls())
         try:
             while True:
+                for p in self.pending:
+                    if p[0] == 0:
+                        self.gain[p[1]] = p[2]
+                    p[0] -= 1
+                self.pending = [p for p in self.pending if p[0] >= 0]
                 signals = {s: round(0.92 * g, 3) for s, g in self.gain.items()}
                 await self.ws.send(json.dumps({"type": "reliability", "signals": signals, "ts": now()}))
                 await asyncio.sleep(1 / RELIABILITY_HZ)

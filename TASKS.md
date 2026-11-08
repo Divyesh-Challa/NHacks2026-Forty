@@ -71,7 +71,7 @@ Done = demo step 1 works with the keyboard alone.
 - [x] `PredictionStrip`: `/predict` after each message; predictions are the first items on the home board (★), one selection to speak
 - [x] `ModeBanner` shows the backend's plain-language reason
 - [x] Header shows the current mapping (which gesture does what)
-- [ ] Pairing flow: patient page uses the stored token
+- [x] Pairing flow: patient page uses the stored token
 
 ## Role D: Caregiver app + auth + prediction (owner: Fikayo)
 Done = demo step 3 works on a phone browser.
