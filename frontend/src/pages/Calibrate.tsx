@@ -89,11 +89,11 @@ export default function Calibrate() {
     }
 
     const handle = (m: Msg) => {
-      clearTimeout(back)
       if (m.type === 'seen') {
         setSeen(m.text)
         return
       }
+      clearTimeout(back)
       if (m.type === 'cue' || m.type === 'rest') setSeen('')
       if (m.type === 'ready') {
         setPhase('run')
@@ -110,8 +110,11 @@ export default function Calibrate() {
         say(WORDS[m.gesture] ?? m.gesture)
         if (spot && m.hold_s > 0) {
           back = setTimeout(() => {
-            setPos(CENTRE)
+            const next = m.next ? `Next: ${(WORDS[m.next] ?? m.next).toLowerCase()}` : ''
+            // Return the target and instruction together; the later rest message extends this phase.
+            show('Centre', next, Math.max(0, m.seconds - m.hold_s))
             beep(440, 0.06)
+            say('Centre')
           }, m.hold_s * 1000)
         }
       } else if (m.type === 'rest') {
@@ -130,6 +133,7 @@ export default function Calibrate() {
       sock.current = ws
       ws.onopen = () => setPhase((p) => (p === 'run' || p === 'done' ? p : 'idle'))
       ws.onclose = () => {
+        clearTimeout(back)
         setPhase((p) => (p === 'done' ? p : 'offline'))
         if (!closed) retry = setTimeout(open, 1500)
       }
