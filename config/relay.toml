@@ -7,6 +7,7 @@ reliability_cutoff = 0.6     # below this a signal is unreliable
 recover_cutoff = 0.75        # must stay at/above this to switch back (hysteresis)
 remap_window = 10            # attempts below cutoff before remapping
 recover_window = 20          # attempts above recover_cutoff before switching back
+merge_window = 12            # maximum reliability messages to combine related remap banners
 debounce_ms = 300            # ignore duplicate commands within this window
 
 [ui]
@@ -43,9 +44,19 @@ vert_floor = 50.0
 vert_invert = false           # flip if look_up reads negative on A1 (calibration detects this)
 look_return_hold_ms = 6000  # an opposite look this soon after a look is the eyes returning to centre, not a command
 vert_h_guard_ms = 700       # up/down detections this close to a left/right event are crosstalk and dropped
+vert_blink_guard_ms = 900   # suppress vertical commands during a blink and its recovery tail
 vert_pair_ms = 350           # a blink's deep trough / second spike follows within this; a look's doesn't
-vert_rearm_ms = 2500          # rebound after a vertical look arrives 1.8-2.3 s later (measured), so longer than eog_rearm_ms
+vert_rearm_ms = 0             # off: it blocked every vertical look for 2.5 s; the zone tracker handles the rebound
+vert_return_hold_ms = 3500    # vertical return to centre arrives 1.8-2.8 s after a look; past this the next pulse is a new look
+look_repeat_guard_ms = 3000   # same vertical look again within this, with no return between, is a bounce
 max_excursion_s = 5.0         # a "movement" longer than this re-baselines (electrode shift)
+
+[detector_overrides]
+# Applied on top of whatever calibration measures, every time signal/calibration.py runs, so a
+# recalibration (new person, moved electrodes) can't lose them. calibration.json is rebuilt from scratch.
+# Keep structural overrides here. Amplitude thresholds are learned from each wearer's recording.
+# Direction thresholds/floors are now learned per wearer; do not pin old rig amplitudes here.
+vert_rearm_ms = 0
 
 [synthetic]
 adc_mid = 512                # 10-bit ADC centre, same units the Arduino prints
