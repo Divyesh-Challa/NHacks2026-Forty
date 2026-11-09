@@ -108,7 +108,7 @@ def test_remap_after_ten_attempts_below_cutoff_emits_mode_change() -> None:
     assert im.mode == "scan"
     assert len(changes) == 1
     assert changes[0].from_ == "wheel" and changes[0].to == "scan"
-    assert "Eye movement" in changes[0].reason
+    assert "Horizontal eye movement" in changes[0].reason
     assert "double blink" in changes[0].reason
 
 
@@ -166,11 +166,11 @@ def test_unmapped_signal_decline_does_not_announce() -> None:
 # --- merge window: losses a few readings apart give one banner ---
 
 EYES_TO_BLINK = (
-    "Eye movement and vertical eye movement reliability fell below 60%. "
+    "Horizontal eye movement and vertical eye movement reliability fell below 60%. "
     "Switching to scan mode with double blink to select."
 )
 EYES_BACK = (
-    "Eye movement and vertical eye movement are reliable again. "
+    "Horizontal eye movement and vertical eye movement are reliable again. "
     "Switching back to eye movement with double blink to finish."
 )
 
@@ -214,7 +214,7 @@ def test_eye_loss_waits_at_most_merge_window_readings() -> None:
             lost_at = i
         if changes:
             assert i - lost_at <= CFG["merge_window"]
-            assert changes[0].reason.startswith("Eye movement reliability")
+            assert changes[0].reason.startswith("Horizontal eye movement reliability")
             break
     else:
         raise AssertionError("eog_h loss never announced")
@@ -226,7 +226,7 @@ def test_lone_eye_loss_with_vertical_healthy_is_not_delayed() -> None:
     assert feed(im, 9, eog_h=0.3, eog_v=0.9, blink=0.9) == []
     changes = feed(im, 1, eog_h=0.3, eog_v=0.9, blink=0.9)
     assert [(c.from_, c.to) for c in changes] == [("wheel", "scan")]
-    assert changes[0].reason == "Eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
+    assert changes[0].reason == "Horizontal eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
 
 
 def test_mapping_is_held_while_a_second_loss_may_join() -> None:
@@ -273,7 +273,7 @@ def test_force_mode_to_the_current_mode_applies_a_held_remap() -> None:
     assert im.remap_held and im.mode == "wheel"
     change = im.force_mode("wheel")
     assert change is not None and (change.from_, change.to) == ("wheel", "scan")
-    assert change.reason == "Eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
+    assert change.reason == "Horizontal eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
     assert im.override is None and not im.remap_held
     assert im.force_mode("scan") is None
 
@@ -286,7 +286,7 @@ def test_force_mode_to_the_current_mode_lands_a_held_wheel_to_scan_remap() -> No
     change = im.force_mode("wheel")
     assert change is not None and (change.from_, change.to) == ("wheel", "scan")
     assert change.reason == (
-        "Eye movement and eyebrow raise reliability fell below 60%. Switching to scan mode with double blink to select."
+        "Horizontal eye movement and eyebrow raise reliability fell below 60%. Switching to scan mode with double blink to select."
     )
     assert im.override is None and not im.remap_held
     assert im.current_mapping() == {"SELECT": "blink_double"}
@@ -329,7 +329,7 @@ def test_hold_ends_when_the_trailing_run_breaks() -> None:
     assert im.remap_held
     changes = feed(im, 1, eog_h=0.3, eog_v=0.9, blink=0.9)  # eog_v recovers: nothing left to wait for
     assert [(c.from_, c.to) for c in changes] == [("wheel", "scan")]
-    assert changes[0].reason.startswith("Eye movement reliability fell below 60%.")
+    assert changes[0].reason.startswith("Horizontal eye movement reliability fell below 60%.")
     assert not im.remap_held
 
 
@@ -340,7 +340,7 @@ def test_loss_and_regain_in_one_banner_name_both() -> None:
     changes = feed(im, 10, eog_h=0.9, eog_v=0.9, blink=0.3, brow=0.9)  # eog_h regains on blink's 10th low reading
     assert len(changes) == 1
     assert changes[0].reason == (
-        "Blinking reliability fell below 60% and eye movement is reliable again. "
+        "Blinking reliability fell below 60% and horizontal eye movement is reliable again. "
         "Switching to eye movement with eyebrow raise to finish."
     )
     assert primary(im) == LOOK and im.current_mapping()["SELECT"] == "brow_raise"

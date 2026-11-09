@@ -74,7 +74,7 @@ MAPPING_SOURCES = {GESTURE_SOURCE[g] for g in [*WHEEL_LOOKS.values(), *WHEEL_FIN
 DEFAULT_SOURCES = ("eog_h", "eog_v", "blink")
 
 SOURCE_NAMES = {
-    "eog_h": "eye movement",
+    "eog_h": "horizontal eye movement",
     "eog_v": "vertical eye movement",
     "blink": "blinking",
     "brow": "eyebrow raise",

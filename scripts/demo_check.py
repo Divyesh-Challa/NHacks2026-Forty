@@ -29,11 +29,11 @@ RELIABILITY_HZ = 20  # faster than the real ~1 Hz so the 10-reading remap takes 
 # one wheel -> scan change, with double blink (left strong) as SELECT.
 LAG = {"eog_v": 3}
 EYES_TO_BLINK = (
-    "Eye movement and vertical eye movement reliability fell below 60%. "
+    "Horizontal eye movement and vertical eye movement reliability fell below 60%. "
     "Switching to scan mode with double blink to select."
 )
 EYES_BACK = (
-    "Eye movement and vertical eye movement are reliable again. "
+    "Horizontal eye movement and vertical eye movement are reliable again. "
     "Switching back to eye movement with double blink to finish."
 )
 
