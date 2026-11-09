@@ -18,6 +18,8 @@ def run(gestures: list[str], gap_s: float = 3.5, seed: int = 0, gain: dict | Non
         t += gap_s
     rows = exg.chunk(int(FS * (t + 1.5)))
     p = Pipeline()
+    for sig, g in (gain or {}).items():
+        p.mark_degraded(sig, g < 1)  # what PipelineSource.degrade does for a synthetic stream
     events = []
     for i in range(0, len(rows), chunk):  # stream it the way the live source does
         events += p.process(rows[i : i + chunk])
@@ -176,6 +178,39 @@ def test_hardware_gain_knob_degrades_like_a_weak_signal() -> None:
     p = Pipeline()
     p.set_gain("eye", 0.3)
     assert names(p.process(rows)) == ["miss:eog_h"]
+
+
+def test_synthetic_vertical_looks_are_detected_and_not_blinks() -> None:
+    # Opposite looks on one axis are kept > look_return_hold_ms apart, as in ALL.
+    got = names(run(["look_up", "blink_double", "look_down", "look_left", "look_up"], gap_s=8.0))
+    assert got == ["look_up", "blink_double", "look_down", "look_left", "look_up"]
+
+
+def test_degraded_vertical_looks_become_near_misses_while_degraded() -> None:
+    assert names(run(["look_up", "look_down"], gap_s=8.0, gain={"eye": 0.3})) == ["miss:eog_v", "miss:eog_v"]
+    # Not degraded (the rig as calibrated): the same weak pulses are dropped, never counted against eog_v.
+    exg = SyntheticEXG(seed=0)
+    exg.degrade("eye", 0.3)
+    exg.trigger("look_up", delay_s=1.0)
+    assert Pipeline().process(exg.chunk(4 * FS)) == []
+
+
+def test_degraded_eye_rest_and_blinks_make_no_vertical_near_misses() -> None:
+    p = Pipeline()
+    p.set_gain("eye", 0.3)
+    assert p.process(SyntheticEXG(seed=4).chunk(60 * FS)) == []  # a minute of rest
+    events = run(["blink_double"] * 4, gap_s=3.0, gain={"eye": 0.3})
+    assert names(events) == ["blink_double"] * 4
+
+
+def test_hardware_gain_knob_turns_vertical_near_misses_on_and_off() -> None:
+    p = Pipeline()
+    p.set_gain("eye", 0.3)
+    assert p.vert.misses
+    p.set_gain("eye", 1.0)
+    assert not p.vert.misses
+    p.set_gain("blink", 0.3)
+    assert not p.vert.misses
 
 
 def test_a2_is_ignored() -> None:
