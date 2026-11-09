@@ -42,6 +42,7 @@ GESTURE_SOURCE: dict[str, str] = {
     "blink_double": "blink",
     "brow_raise": "brow",
 }
+MAPPING_SOURCES = set(GESTURE_SOURCE.values())
 
 # Wheel mode: the four looks pick slots.
 WHEEL_LOOKS = {"LEFT": "look_left", "RIGHT": "look_right", "UP": "look_up", "DOWN": "look_down"}
@@ -95,6 +96,7 @@ class InputManager:
     _regained: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self.cfg = {**INPUT, **self.cfg}
         self.mode, self.mapping = self._choose()
 
     # --- events in ---
@@ -165,7 +167,7 @@ class InputManager:
         """Manual mode toggle. Asking for the current mode lands a held remap (with its own reason).
 
         That request leaves `override` alone: pinning the current mode could hold the board on a
-        dead mapping (e.g. split on failed eyes when the held remap is to jaw scan).
+        dead mapping (e.g. wheel on failed eyes when the held remap is to scan).
         """
         if mode == self.mode:
             return self._apply(self._reason()) if self.remap_held else None
@@ -208,6 +210,10 @@ class InputManager:
             return "wheel", {**WHEEL_LOOKS, "SELECT": WHEEL_FINISH[0]}
 
         candidates = [g for g in SCAN_SELECT if self._ok(g)] or SCAN_SELECT
+        current = self.mapping.get("SELECT")
+        # Keep the selected control while it is healthy, or until some control becomes healthy.
+        if self.mode == "scan" and current in candidates:
+            return "scan", {"SELECT": current}
         select = max(candidates, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
         return "scan", {"SELECT": select}
 
@@ -249,13 +255,8 @@ class InputManager:
         return False
 
     def _refresh_extras(self) -> None:
-        """While a remap is held: keep mode and LEFT/RIGHT/SELECT, let BACK and HELP follow health."""
-        mapping = {k: v for k, v in self.mapping.items() if k in PRIMARY}
-        if self.mode == "split" and self._ok("blink_double") and "blink_double" not in mapping.values():
-            mapping["BACK"] = "blink_double"
-        if self._ok(HELP_GESTURE):
-            mapping["HELP"] = HELP_GESTURE
-        self.mapping = mapping
+        """Hold the primary controls; wheel/scan have no extra BACK or HELP gestures."""
+        self.mapping = {k: v for k, v in self.mapping.items() if k in PRIMARY}
 
     def _apply(self, reason) -> ModeChangeEvent | None:
         """Recompute mode/mapping; return a ModeChangeEvent if anything primary changed.
@@ -280,6 +281,7 @@ class InputManager:
         regained = sorted(self._regained, key=_source_order)
 
         def build() -> str:
+            fell = back = ""
             select = GESTURE_NAMES[self.mapping["SELECT"]]
             if self.mode == "scan":
                 target = f"scan mode with {select} to select"

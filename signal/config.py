@@ -14,5 +14,6 @@ with open(ROOT / "config" / "relay.toml", "rb") as f:
 SIGNAL = _TOML["signal"]
 SYNTHETIC = _TOML["synthetic"]
 DETECTORS = _TOML["detectors"]
+DETECTOR_OVERRIDES = _TOML.get("detector_overrides", {})  # pinned on top of calibration, see relay.toml
 
 BACKEND_WS_URL = os.getenv("BACKEND_WS_URL", "ws://localhost:8000/ws/signal")

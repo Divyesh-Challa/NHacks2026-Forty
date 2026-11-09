@@ -7,8 +7,10 @@ import { LetterBoard, LetterGrid } from '../components/LetterBoard'
 import { ModeBanner } from '../components/ModeBanner'
 import { RadialWheel } from '../components/RadialWheel'
 import { getConfig } from '../lib/api'
+import { allowed, DEMO_SCENARIOS } from '../lib/demoPath'
 import { FlickDetector } from '../lib/flickSim'
 import { attachKeyboardSim } from '../lib/keyboardSim'
+import { pairedToken } from '../lib/pairing'
 import { SPELL_ITEMS } from '../lib/spell'
 import { aid, speak, unlock } from '../lib/tts'
 import type { Command, Mode, ModeChangeEvent } from '../lib/types'
@@ -62,6 +64,7 @@ export default function Patient() {
   const [helpActive, setHelpActive] = useState(false)
   const [connected, setConnected] = useState(false)
   const [tickEpoch, setTickEpoch] = useState(0)
+  const [demo, setDemo] = useState<string | null>(null) // guided demo sentence (keys 1-9), see lib/demoPath.ts
   const sock = useRef<RelaySocket | null>(null)
 
   const ctx: Ctx = useMemo(
@@ -71,14 +74,15 @@ export default function Patient() {
 
   // The socket, timers and key handlers outlive renders, so they read the latest values from here.
   const machineRef = useRef(machine)
-  const live = useRef({ ctx, aidOn, links })
+  const live = useRef({ ctx, aidOn, links, demo })
   useEffect(() => {
-    live.current = { ctx, aidOn, links }
+    live.current = { ctx, aidOn, links, demo }
   })
 
   const run = useCallback(
     (action: Action) => {
-      const { ctx, aidOn, links } = live.current
+      const { ctx, aidOn, links, demo } = live.current
+      if (demo && action.type === 'command' && !allowed(action.command, machineRef.current, ctx, demo)) return
       const [next, effects] = step(machineRef.current, action, ctx)
       machineRef.current = next
       setMachine(next)
@@ -119,6 +123,7 @@ export default function Patient() {
   }, [id])
 
   useEffect(() => {
+    const token = pairedToken(id)
     const s = connect(
       `/ws/patient/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       (ev) => {
@@ -181,6 +186,13 @@ export default function Patient() {
         },
         flick: () => setFlickOn((on) => !on),
         aid: () => setAidOn((on) => !on),
+        demo: (n) => {
+          const next = DEMO_SCENARIOS[n - 1] ?? null // 0 = off
+          live.current.demo = next
+          setDemo(next)
+          machineRef.current = INITIAL // each scenario starts from Home
+          setMachine(INITIAL)
+        },
       }),
     [mode, connected, run],
   )
