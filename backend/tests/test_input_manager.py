@@ -4,6 +4,7 @@ A reliability "reading" (one value for one signal in a reliability event) counts
 There are no jaw/HELP gestures: HELP is a wheel slot confirmed with SELECT (double blink).
 """
 
+from app.config import INPUT
 from app.input_manager import InputManager
 from app.models import GestureEvent, ModeChangeEvent, ReliabilityEvent, SignalReliabilityEvent
 
@@ -49,6 +50,10 @@ def gesture(im: InputManager, g: str, ts: int = 0) -> list[str]:
 def primary(im: InputManager) -> dict[str, str]:
     m = im.current_mapping()
     return {k: m[k] for k in ("LEFT", "RIGHT", "UP", "DOWN") if k in m}
+
+
+def test_config_has_every_input_key() -> None:
+    assert set(CFG) <= set(INPUT), set(CFG) - set(INPUT)
 
 
 # --- mode selection ---
@@ -122,46 +127,89 @@ def test_losing_the_finish_gesture_switches_to_scan() -> None:
     assert changes[-1].from_ == "wheel" and changes[-1].to == "scan"
 
 
+# --- scan-mode SELECT is sticky ---
+
+def test_scan_keeps_select_while_nothing_is_healthy() -> None:
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    feed(im, 10, eog_h=0.3, eog_v=0.3, blink=0.3)
+    assert im.mode == "scan"
+    select = im.current_mapping()["SELECT"]
+
+    # Hovering between the cutoffs changes no signal's health, so SELECT must not move either.
+    changes = feed(im, 1, eog_h=0.74, eog_v=0.6, blink=0.6) + feed(im, 1, eog_h=0.6, eog_v=0.6, blink=0.74)
+    assert changes == []
+    assert im.current_mapping()["SELECT"] == select
+
+
+def test_scan_keeps_select_while_another_candidate_reads_higher() -> None:
+    im = make(eog_h=0.3, blink=0.7, brow=0.65)
+    assert im.current_mapping() == {"SELECT": "blink_double"}
+    assert feed(im, 1, eog_h=0.3, blink=0.62, brow=0.74) == []
+    assert im.current_mapping() == {"SELECT": "blink_double"}
+
+
+def test_scan_repicks_select_when_its_signal_becomes_unhealthy() -> None:
+    im = make(eog_h=0.3, blink=0.9)
+    assert im.current_mapping()["SELECT"] == "blink_double"
+    feed(im, 9, blink=0.3)
+    changes = feed(im, 1, blink=0.3, brow=0.9)
+    assert im.mode == "scan" and im.current_mapping()["SELECT"] == "brow_raise"
+    assert len(changes) == 1 and changes[0].reason.startswith("Blinking reliability fell below 60%")
+
+
+def test_unmapped_signal_decline_does_not_announce() -> None:
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9, brow=0.9)  # wheel finishes with blink; brow is unused
+    assert feed(im, 10, eog_h=0.9, eog_v=0.9, blink=0.9, brow=0.3) == []
+    assert primary(im) == LOOK and im.current_mapping()["SELECT"] == "blink_double"
+
+
 # --- merge window: losses a few readings apart give one banner ---
 
-EYE_TO_JAW = "Eye movement and blinking reliability fell below 60%. Switching to scan mode with jaw clench to select."
+EYES_TO_BLINK = (
+    "Eye movement and vertical eye movement reliability fell below 60%. "
+    "Switching to scan mode with double blink to select."
+)
+EYES_BACK = (
+    "Eye movement and vertical eye movement are reliable again. "
+    "Switching back to eye movement with double blink to finish."
+)
 
 
 def staggered(im: InputManager, first: str, second: str, gap: int, n: int, to: float = 0.3) -> list[ModeChangeEvent]:
-    """`first` moves to `to` now and `second` follows `gap` readings later; jaw stays healthy."""
+    """`first` moves to `to` now and `second` follows `gap` readings later; blink stays healthy."""
     before = 0.9 if to < 0.6 else 0.3
     changes: list[ModeChangeEvent] = []
     for i in range(n):
-        signals = {first: to, second: to if i >= gap else before, "jaw": 0.9}
+        signals = {first: to, second: to if i >= gap else before, "blink": 0.9}
         changes += feed(im, 1, **signals)
     return changes
 
 
 def test_eye_signals_lost_a_few_readings_apart_give_one_banner() -> None:
     for gap in (1, 2, 3):
-        im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-        changes = staggered(im, "eog_h", "blink", gap, n=40)
+        im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+        changes = staggered(im, "eog_h", "eog_v", gap, n=40)
         assert len(changes) == 1, (gap, [c.reason for c in changes])
-        assert (changes[0].from_, changes[0].to) == ("split", "scan")
-        assert changes[0].reason == EYE_TO_JAW
-        assert im.mode == "scan" and im.current_mapping()["SELECT"] == "jaw_clench"
+        assert (changes[0].from_, changes[0].to) == ("wheel", "scan")
+        assert changes[0].reason == EYES_TO_BLINK
+        assert im.mode == "scan" and im.current_mapping() == {"SELECT": "blink_double"}
 
 
-def test_blink_lost_first_still_names_both_eye_signals() -> None:
+def test_vertical_lost_first_still_names_both_eye_signals() -> None:
     for gap in (1, 2, 3):
-        im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-        changes = staggered(im, "blink", "eog_h", gap, n=40)
-        assert [(c.from_, c.to, c.reason) for c in changes] == [("split", "scan", EYE_TO_JAW)], gap
+        im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+        changes = staggered(im, "eog_v", "eog_h", gap, n=40)
+        assert [(c.from_, c.to, c.reason) for c in changes] == [("wheel", "scan", EYES_TO_BLINK)], gap
 
 
 def test_eye_loss_waits_at_most_merge_window_readings() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    # blink hovers just below the cutoff and keeps resetting its streak, so it never fails
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    # eog_v hovers just below the cutoff and keeps resetting its streak, so it never fails
     for i in range(9):
-        feed(im, 1, eog_h=0.3, blink=0.5, jaw=0.9)
+        feed(im, 1, eog_h=0.3, eog_v=0.5, blink=0.9)
     lost_at = None
     for i in range(30):
-        changes = feed(im, 1, eog_h=0.3, blink=0.5 if i % 5 else 0.7, jaw=0.9)
+        changes = feed(im, 1, eog_h=0.3, eog_v=0.5 if i % 5 else 0.7, blink=0.9)
         if lost_at is None and not im.healthy["eog_h"]:
             lost_at = i
         if changes:
@@ -170,127 +218,132 @@ def test_eye_loss_waits_at_most_merge_window_readings() -> None:
             break
     else:
         raise AssertionError("eog_h loss never announced")
-    assert primary(im) == BLINK_JAW
+    assert im.mode == "scan" and im.current_mapping() == {"SELECT": "blink_double"}
 
 
-def test_lone_eye_loss_with_blink_healthy_is_not_delayed() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    assert feed(im, 9, eog_h=0.3, blink=0.9, jaw=0.9) == []
-    changes = feed(im, 1, eog_h=0.3, blink=0.9, jaw=0.9)
-    assert [(c.from_, c.to) for c in changes] == [("split", "split")]
-    assert changes[0].reason == "Eye movement reliability fell below 60%. Switching to double blink and jaw clench."
+def test_lone_eye_loss_with_vertical_healthy_is_not_delayed() -> None:
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    assert feed(im, 9, eog_h=0.3, eog_v=0.9, blink=0.9) == []
+    changes = feed(im, 1, eog_h=0.3, eog_v=0.9, blink=0.9)
+    assert [(c.from_, c.to) for c in changes] == [("wheel", "scan")]
+    assert changes[0].reason == "Eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
 
 
 def test_mapping_is_held_while_a_second_loss_may_join() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    staggered(im, "eog_h", "blink", gap=3, n=10)  # eog_h lost; blink 3 readings from failing
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    staggered(im, "eog_h", "eog_v", gap=3, n=10)  # eog_h lost; eog_v 3 readings from failing
     assert not im.healthy["eog_h"]
-    assert primary(im) == LOOK and im.mode == "split"
-    assert im.current_mapping()["HELP"] == "jaw_hold"
+    assert im.remap_held
+    assert primary(im) == LOOK and im.mode == "wheel"
+    assert im.current_mapping()["SELECT"] == "blink_double"
 
 
 def test_eye_regain_gives_one_banner_back_to_eye_movement() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    feed(im, 10, eog_h=0.3, blink=0.3, jaw=0.9)
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    feed(im, 10, eog_h=0.3, eog_v=0.3, blink=0.9)
     assert im.mode == "scan"
-    changes = staggered(im, "eog_h", "blink", gap=3, n=40, to=0.9)
-    assert [(c.from_, c.to) for c in changes] == [("scan", "split")], [c.reason for c in changes]
-    assert changes[0].reason == "Eye movement and blinking are reliable again. Switching back to eye movement."
-    assert primary(im) == LOOK and im.current_mapping()["BACK"] == "blink_double"
+    changes = staggered(im, "eog_h", "eog_v", gap=3, n=40, to=0.9)
+    assert [(c.from_, c.to) for c in changes] == [("scan", "wheel")], [c.reason for c in changes]
+    assert changes[0].reason == EYES_BACK
+    assert primary(im) == LOOK and im.current_mapping()["SELECT"] == "blink_double"
 
 
 def test_regain_and_loss_cycles_do_not_flap() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
     seen: list[tuple[str, str]] = []
     for cycle in range(3):
-        seen += [(c.from_, c.to) for c in staggered(im, "eog_h", "blink", gap=2, n=40)]
-        seen += [(c.from_, c.to) for c in staggered(im, "eog_h", "blink", gap=2, n=60, to=0.9)]
-    assert seen == [("split", "scan"), ("scan", "split")] * 3
+        seen += [(c.from_, c.to) for c in staggered(im, "eog_h", "eog_v", gap=2, n=40)]
+        seen += [(c.from_, c.to) for c in staggered(im, "eog_h", "eog_v", gap=2, n=60, to=0.9)]
+    assert seen == [("wheel", "scan"), ("scan", "wheel")] * 3
 
 
 def test_force_mode_during_a_held_remap_applies_it() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    staggered(im, "eog_h", "blink", gap=3, n=10)
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    staggered(im, "eog_h", "eog_v", gap=3, n=10)
     change = im.force_mode("scan")
     assert change is not None and change.to == "scan"
-    assert im.current_mapping()["SELECT"] == "jaw_clench"
-    # the held eye remap was absorbed into the manual switch: blink's later loss is not announced again
-    assert staggered(im, "eog_h", "blink", gap=0, n=10) == []
+    assert im.current_mapping()["SELECT"] == "blink_double"
+    # the held eye remap was absorbed into the manual switch: eog_v's later loss is not announced again
+    assert staggered(im, "eog_h", "eog_v", gap=0, n=10) == []
 
 
 def test_force_mode_to_the_current_mode_applies_a_held_remap() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    staggered(im, "eog_h", "blink", gap=3, n=10)
-    assert im.remap_held and im.mode == "split"
-    change = im.force_mode("split")
-    assert change is not None and (change.from_, change.to) == ("split", "split")
-    assert change.reason == "Eye movement reliability fell below 60%. Switching to double blink and jaw clench."
-    assert primary(im) == BLINK_JAW and not im.remap_held
-    assert im.force_mode("split") is None
-
-
-def test_force_mode_to_the_current_mode_lands_a_held_split_to_scan_remap() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    for i in range(12):  # blink fails first (BACK only), then eog_h while jaw is part-way into a low run
-        feed(im, 1, eog_h=0.3 if i >= 2 else 0.9, blink=0.3, jaw=0.3 if i >= 8 else 0.9)
-    assert im.remap_held and im.mode == "split" and primary(im) == LOOK
-    change = im.force_mode("split")
-    assert change is not None and (change.from_, change.to) == ("split", "scan")
-    assert change.reason == EYE_TO_JAW
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    staggered(im, "eog_h", "eog_v", gap=3, n=10)
+    assert im.remap_held and im.mode == "wheel"
+    change = im.force_mode("wheel")
+    assert change is not None and (change.from_, change.to) == ("wheel", "scan")
+    assert change.reason == "Eye movement reliability fell below 60%. Switching to scan mode with double blink to select."
     assert im.override is None and not im.remap_held
-    assert im.current_mapping() == {"SELECT": "jaw_clench", "HELP": "jaw_hold"}
-    for _ in range(25):  # jaw recovers: the board stays on jaw scan, never the dead eye fallback
-        feed(im, 1, eog_h=0.3, blink=0.3, jaw=0.9)
-        assert im.mode == "scan" and im.current_mapping()["SELECT"] == "jaw_clench"
+    assert im.force_mode("scan") is None
+
+
+def test_force_mode_to_the_current_mode_lands_a_held_wheel_to_scan_remap() -> None:
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9, brow=0.9)
+    for i in range(12):  # brow fails first (unused), then eog_h while eog_v is part-way into a low run
+        feed(im, 1, eog_h=0.3 if i >= 2 else 0.9, eog_v=0.3 if i >= 8 else 0.9, blink=0.9, brow=0.3)
+    assert im.remap_held and im.mode == "wheel" and primary(im) == LOOK
+    change = im.force_mode("wheel")
+    assert change is not None and (change.from_, change.to) == ("wheel", "scan")
+    assert change.reason == (
+        "Eye movement and eyebrow raise reliability fell below 60%. Switching to scan mode with double blink to select."
+    )
+    assert im.override is None and not im.remap_held
+    assert im.current_mapping() == {"SELECT": "blink_double"}
+    for _ in range(25):  # the board stays on blink scan, never the dead eye-wheel fallback
+        feed(im, 1, eog_h=0.3, eog_v=0.3, blink=0.9, brow=0.3)
+        assert im.mode == "scan" and im.current_mapping() == {"SELECT": "blink_double"}
 
 
 # --- merge window: only a streak under way holds a remap, never a steady hover ---
 
-def test_shaky_jaw_does_not_delay_an_eye_loss() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    assert feed(im, 9, eog_h=0.3, blink=0.9, jaw=0.7) == []
-    changes = feed(im, 1, eog_h=0.3, blink=0.9, jaw=0.7)
-    assert [(c.from_, c.to) for c in changes] == [("split", "split")]
+def test_shaky_vertical_does_not_delay_an_eye_loss() -> None:
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    assert feed(im, 9, eog_h=0.3, eog_v=0.7, blink=0.9) == []
+    changes = feed(im, 1, eog_h=0.3, eog_v=0.7, blink=0.9)
+    assert [(c.from_, c.to) for c in changes] == [("wheel", "scan")]
     assert not im.remap_held
 
 
-def test_jaw_loss_remaps_at_once_while_blink_hovers() -> None:
-    im = make(eog_h=0.3, blink=0.9, jaw=0.9)
-    assert primary(im) == BLINK_JAW
-    assert feed(im, 9, eog_h=0.3, blink=0.7, jaw=0.3) == []
-    changes = feed(im, 1, eog_h=0.3, blink=0.7, jaw=0.3)
-    assert [(c.from_, c.to) for c in changes] == [("split", "scan")]
-    assert im.current_mapping() == {"SELECT": "blink_double"}  # dead jaw no longer RIGHT, HELP gone
+def test_blink_loss_remaps_at_once_while_vertical_hovers() -> None:
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    assert feed(im, 9, eog_h=0.9, eog_v=0.7, blink=0.3) == []
+    changes = feed(im, 1, eog_h=0.9, eog_v=0.7, blink=0.3)
+    assert [(c.from_, c.to) for c in changes] == [("wheel", "scan")]
+    assert not im.remap_held
+    assert im.current_mapping() == {"SELECT": "look_right"}  # no finish gesture left, so no wheel
 
 
 def test_unhealthy_hover_does_not_delay_a_regain() -> None:
-    im = make(eog_h=0.3, blink=0.3, jaw=0.9)
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.3, brow=0.3)
     assert im.mode == "scan"
-    assert feed(im, 19, eog_h=0.65, blink=0.9, jaw=0.9) == []
-    changes = feed(im, 1, eog_h=0.65, blink=0.9, jaw=0.9)
-    assert [(c.from_, c.to) for c in changes] == [("scan", "split")]
-    assert primary(im) == BLINK_JAW
+    assert feed(im, 19, eog_h=0.9, eog_v=0.9, blink=0.9, brow=0.65) == []
+    changes = feed(im, 1, eog_h=0.9, eog_v=0.9, blink=0.9, brow=0.65)
+    assert [(c.from_, c.to) for c in changes] == [("scan", "wheel")]
+    assert primary(im) == LOOK and im.current_mapping()["SELECT"] == "blink_double"
 
 
 def test_hold_ends_when_the_trailing_run_breaks() -> None:
-    im = make(eog_h=0.9, blink=0.9, jaw=0.9)
-    staggered(im, "eog_h", "blink", gap=3, n=10)  # eog_h lost; blink 7 readings into its run
+    im = make(eog_h=0.9, eog_v=0.9, blink=0.9)
+    staggered(im, "eog_h", "eog_v", gap=3, n=10)  # eog_h lost; eog_v 7 readings into its run
     assert im.remap_held
-    changes = feed(im, 1, eog_h=0.3, blink=0.9, jaw=0.9)  # blink recovers: nothing left to wait for
-    assert [(c.from_, c.to) for c in changes] == [("split", "split")]
-    assert primary(im) == BLINK_JAW and not im.remap_held
+    changes = feed(im, 1, eog_h=0.3, eog_v=0.9, blink=0.9)  # eog_v recovers: nothing left to wait for
+    assert [(c.from_, c.to) for c in changes] == [("wheel", "scan")]
+    assert changes[0].reason.startswith("Eye movement reliability fell below 60%.")
+    assert not im.remap_held
 
 
 def test_loss_and_regain_in_one_banner_name_both() -> None:
-    im = make(eog_h=0.3, blink=0.9, jaw=0.9)
-    assert primary(im) == BLINK_JAW
-    feed(im, 10, eog_h=0.9, blink=0.9, jaw=0.9)
-    changes = feed(im, 10, eog_h=0.9, blink=0.9, jaw=0.3)  # eog_h regains on jaw's 10th low reading
+    im = make(eog_h=0.3, eog_v=0.9, blink=0.9, brow=0.9)
+    assert im.mode == "scan" and im.current_mapping() == {"SELECT": "blink_double"}
+    feed(im, 10, eog_h=0.9, eog_v=0.9, blink=0.9, brow=0.9)
+    changes = feed(im, 10, eog_h=0.9, eog_v=0.9, blink=0.3, brow=0.9)  # eog_h regains on blink's 10th low reading
     assert len(changes) == 1
     assert changes[0].reason == (
-        "Jaw clench reliability fell below 60% and eye movement is reliable again. Switching to eye movement."
+        "Blinking reliability fell below 60% and eye movement is reliable again. "
+        "Switching to eye movement with eyebrow raise to finish."
     )
-    assert primary(im) == LOOK
+    assert primary(im) == LOOK and im.current_mapping()["SELECT"] == "brow_raise"
 
 
 # --- hysteresis ---

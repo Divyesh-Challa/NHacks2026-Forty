@@ -12,8 +12,24 @@ How it decides:
     horizontal and vertical eye movement are both healthy and a finish gesture is: the four looks
     pick slots and the first healthy WHEEL_FINISH gesture (double blink) = SELECT.
     There is no BACK gesture: looking at the kept slot again goes back.
-    Otherwise scan mode with the most reliable healthy gesture as SELECT.
+    Otherwise scan mode with one SELECT gesture from SCAN_SELECT.
+  - Scan SELECT is sticky: the current SELECT (a wheel-mode finish carries over) is kept while it
+    is healthy, or while no candidate is. It is re-picked (most reliable healthy candidate) only
+    when its signal turns unhealthy and another candidate is healthy, or when there is no current
+    SELECT. So it changes only on a health change, never on live values.
   - A mode_change is emitted when the mode or a primary control (looks/SELECT) changes.
+  - Merge window: when a health change would move a primary control while another mapping signal
+    is part-way through its own health-changing run (healthy with a run below `reliability_cutoff`
+    that can reach `remap_window`, or unhealthy with a run at/above `recover_cutoff` that can reach
+    `recover_window`, before `merge_window` readings have passed), the remap is held. It lands when
+    that run completes (and joins the banner), when the run breaks, or when the window ends. So the
+    eye degrade (eog_h and eog_v failing a few readings apart) gives one wheel -> scan banner naming
+    both, while a lone loss, or one next to a signal steadily hovering between the cutoffs, is
+    applied at once. A hold lasts at most 12 readings (`merge_window`); at most 9 when the only run
+    being waited on is a loss (a run already under way finishes within `remap_window` - 1 more
+    readings; a pending regain run, or another run starting later, can keep it open up to 12).
+    The health rule itself is never delayed; while held, the old mode and mapping stay.
+    Readings (reliability events) are the clock.
   - HELP is not a gesture. The patient screen has a HELP slot (wheel) / item (scan) that is confirmed
     with SELECT, then the screen sends the alert itself. ACCEPT (centre suggestion) has no gesture
     either: double blink is the finish, so it only comes from the keyboard/mouse simulators.
@@ -47,9 +63,12 @@ GESTURE_SOURCE: dict[str, str] = {
 WHEEL_LOOKS = {"LEFT": "look_left", "RIGHT": "look_right", "UP": "look_up", "DOWN": "look_down"}
 # Wheel-mode SELECT (finish / confirm) in preference order; the first healthy one wins.
 WHEEL_FINISH = ["blink_double", "brow_raise"]
-# Scan-mode SELECT candidates; the most reliable healthy one wins.
+# Scan-mode SELECT candidates. The current SELECT is kept while it is healthy or while none is;
+# otherwise the most reliable healthy candidate is picked.
 SCAN_SELECT = ["blink_double", "brow_raise", "look_right"]
 PRIMARY = ("LEFT", "RIGHT", "UP", "DOWN", "SELECT")
+# Sources that some mapping can use (eog_h, eog_v, blink, brow); only these can hold a remap open.
+MAPPING_SOURCES = {GESTURE_SOURCE[g] for g in [*WHEEL_LOOKS.values(), *WHEEL_FINISH, *SCAN_SELECT]}
 
 # Sources wired on the 2-pill rig; assumed healthy until their first reading arrives.
 DEFAULT_SOURCES = ("eog_h", "eog_v", "blink")
@@ -147,9 +166,7 @@ class InputManager:
         out: list[ReliabilityEvent | ModeChangeEvent] = []
         if self._held_since is None and (lost or regained) and self._would_change() and self._settling():
             self._held_since = self._readings
-        if self._held_since is not None and self._settling():
-            self._refresh_extras()
-        else:
+        if self._held_since is None or not self._settling():  # held: the board keeps its mapping
             change = self._apply(self._reason())
             if change:
                 out.append(change)
@@ -165,7 +182,7 @@ class InputManager:
         """Manual mode toggle. Asking for the current mode lands a held remap (with its own reason).
 
         That request leaves `override` alone: pinning the current mode could hold the board on a
-        dead mapping (e.g. split on failed eyes when the held remap is to jaw scan).
+        dead mapping (e.g. wheel on failed eyes when the held remap is to double-blink scan).
         """
         if mode == self.mode:
             return self._apply(self._reason()) if self.remap_held else None
@@ -207,8 +224,14 @@ class InputManager:
         if mode == "wheel":  # forced wheel without healthy eyes: fall back to the default mapping
             return "wheel", {**WHEEL_LOOKS, "SELECT": WHEEL_FINISH[0]}
 
-        candidates = [g for g in SCAN_SELECT if self._ok(g)] or SCAN_SELECT
-        select = max(candidates, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
+        # Sticky SELECT: keep the current one (a wheel-mode finish carries over) while it is healthy,
+        # or while nothing is. Health has hysteresis, so live values between the cutoffs never flip it.
+        healthy = [g for g in SCAN_SELECT if self._ok(g)]
+        current = self.mapping.get("SELECT")
+        if current in SCAN_SELECT and (self._ok(current) or not healthy):
+            select = current
+        else:
+            select = max(healthy or SCAN_SELECT, key=lambda g: self.reliability.get(GESTURE_SOURCE[g], 0.0))
         return "scan", {"SELECT": select}
 
     def _changes_primary(self, mode: Mode, mapping: dict[str, str]) -> bool:
@@ -248,20 +271,11 @@ class InputManager:
                     return True
         return False
 
-    def _refresh_extras(self) -> None:
-        """While a remap is held: keep mode and LEFT/RIGHT/SELECT, let BACK and HELP follow health."""
-        mapping = {k: v for k, v in self.mapping.items() if k in PRIMARY}
-        if self.mode == "split" and self._ok("blink_double") and "blink_double" not in mapping.values():
-            mapping["BACK"] = "blink_double"
-        if self._ok(HELP_GESTURE):
-            mapping["HELP"] = HELP_GESTURE
-        self.mapping = mapping
-
     def _apply(self, reason) -> ModeChangeEvent | None:
         """Recompute mode/mapping; return a ModeChangeEvent if anything primary changed.
 
         Ends any held remap. Pending losses/regains are kept until a banner names them, so a loss
-        that changed nothing primary (e.g. blink while it was only BACK) is named by a remap that
+        that changed nothing primary (e.g. brow while blink is the finish) is named by a remap that
         follows inside the window.
         """
         self._held_since = None
@@ -285,6 +299,7 @@ class InputManager:
                 target = f"scan mode with {select} to select"
             else:
                 target = f"eye movement with {select} to finish"
+            fell = back = ""
             if lost:
                 fell = f"{_join([SOURCE_NAMES.get(s, s) for s in lost])} reliability fell below "
                 fell += f"{self.cfg['reliability_cutoff']:.0%}"
