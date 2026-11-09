@@ -59,3 +59,21 @@ def test_live_source_uses_calibration_and_near_misses_lower_reliability() -> Non
     assert src.reliability()["signals"]["eog_h"] >= 0.9  # seeded from calibration
     assert src.handle(src.stream.read()) == []  # weak looks aren't detected...
     assert src.reliability()["signals"]["eog_h"] < 0.6  # ...and the near-misses count against it
+
+
+def test_pinned_overrides_survive_calibration(monkeypatch) -> None:
+    import calibration
+
+    monkeypatch.setattr(calibration, "DETECTOR_OVERRIDES", {"vert_threshold": 28.0, "vert_rearm_ms": 0})
+    s = calibrate(*synthetic_session(reps=4, seed=6))["settings"]
+    assert s["vert_threshold"] == 28.0 and s["vert_rearm_ms"] == 0
+
+
+def test_rail_warning_flags_a_saturating_channel() -> None:
+    from calibration import rail_warnings
+
+    rows, _ = synthetic_session(reps=2, seed=7)
+    assert rail_warnings(rows) == []
+    bad = rows.copy()
+    bad[: len(bad) // 10, 1] = 1020  # A0 pinned at the top rail for 10% of the run
+    assert len(rail_warnings(bad)) == 1 and "A0" in rail_warnings(bad)[0]

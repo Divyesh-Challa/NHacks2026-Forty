@@ -335,6 +335,9 @@ class Pipeline:
         self.up_swing_ratio = s.get("vert_up_swing_ratio", 0.3)
         self.last_up_ts = -10**12
         self.return_hold_ms = s.get("look_return_hold_ms", 8000)  # 0 turns the position tracking off
+        # The vertical return arrives 1.8-2.8 s after a look, so past ~3.5 s the eyes are back at centre
+        # and the next vertical pulse is a new look (a stale "up" zone swallowed real downs).
+        self.axis_hold = {"h": self.return_hold_ms, "v": min(self.return_hold_ms, s.get("vert_return_hold_ms", 3500))}
         self.position: dict[str, tuple[int, int]] = {"h": (0, 0), "v": (0, 0)}  # axis -> (zone, ts of that look)
         # One unit = a centre-to-side look. A pulse at least sweep_ratio units big is a side-to-side sweep
         # (2 units). Vertical pulses are small and noisy, so its boundary is stricter.
@@ -398,8 +401,8 @@ class Pipeline:
                 continue
             name, sign = axis
             pos, ts = self.position[name]
-            seen.append((e, pos if e.ts - ts <= self.return_hold_ms else 0))
-            if e.ts - ts > self.return_hold_ms:
+            seen.append((e, pos if e.ts - ts <= self.axis_hold[name] else 0))
+            if e.ts - ts > self.axis_hold[name]:
                 pos = 0
             if self.up_needs_swing and name == "v":
                 if e.gesture == "look_up" and e.confirmed and e.swing >= self.up_swing_ratio * e.peak:
