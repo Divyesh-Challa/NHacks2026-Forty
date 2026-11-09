@@ -80,6 +80,8 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
     setStatus('idle')
   }
   const patch = (i: number, p: Partial<Draft>) => edit((d) => d.map((x, j) => (j === i ? { ...x, ...p } : x)))
+  // Expanding or collapsing a board is not an edit: it must not wipe "Saving…" / "Saved" / "Save failed".
+  const toggle = (i: number) => setDrafts((d) => d.map((x, j) => (j === i ? { ...x, open: !x.open } : x)))
   const setPhrase = (i: number, k: number, v: string) =>
     patch(i, { phrases: drafts[i].phrases.map((p) => (p.k === k ? { ...p, v } : p)) })
   const addPhrase = (i: number, after?: number) => {
@@ -93,19 +95,27 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
   const out = toBoards(drafts)
   const dirty = JSON.stringify(out) !== JSON.stringify(toBoards(boards.map((b) => toDraft(b))))
 
+  // A board with phrases but no name would be dropped by toBoards(): block the save instead of deleting it silently.
+  const nameless = drafts.flatMap((d, i) => (!d.title.trim() && d.phrases.some((p) => p.v.trim()) ? [i + 1] : []))
+
   const save = () => {
+    if (nameless.length) return
     setStatus('saving')
     onSave(out)
       .then(() => setStatus('saved'))
       .catch(() => setStatus('failed'))
   }
 
+  const blocked = nameless.length
+    ? `${nameless.length === 1 ? `Board ${nameless[0]} has` : `Boards ${nameless.join(', ')} have`} phrases but no name. Name ${nameless.length === 1 ? 'it' : 'them'} to save.`
+    : ''
   const message =
     status === 'saving' ? 'Saving…'
+    : blocked ? blocked
     : status === 'saved' ? 'Saved. The patient screen updated.'
     : status === 'failed' ? 'Save failed. Try again.'
     : dirty ? 'Unsaved changes' : 'Matches the patient screen'
-  const tone = status === 'saved' ? 'ok' : status === 'failed' ? 'fail' : dirty ? 'dirty' : ''
+  const tone = status === 'saving' ? '' : blocked ? 'fail' : status === 'saved' ? 'ok' : status === 'failed' ? 'fail' : dirty ? 'dirty' : ''
 
   return (
     <div className="cg-editor-wrap cg-editor-body">
@@ -120,10 +130,14 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
           const n = d.phrases.filter((p) => p.v.trim()).length
           return (
             <section key={d.k} className="cg-board">
-              <button className="cg-board-head" aria-expanded={d.open} onClick={() => patch(i, { open: !d.open })}>
+              <button className="cg-board-head" aria-expanded={d.open} onClick={() => toggle(i)}>
                 <span className="t">
                   <b>{d.title.trim() || 'Untitled board'}</b>
-                  <small>{n} {n === 1 ? 'phrase' : 'phrases'}</small>
+                  {!d.title.trim() && n ? (
+                    <small className="need">Needs a name</small>
+                  ) : (
+                    <small>{n} {n === 1 ? 'phrase' : 'phrases'}</small>
+                  )}
                 </span>
                 <Chevron />
               </button>
@@ -136,6 +150,7 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
                       onChange={(e) => patch(i, { title: e.target.value })}
                       data-fk={`t${d.k}`}
                       aria-label="Board title"
+                      aria-invalid={!d.title.trim() && n > 0}
                     />
                   </label>
                   <div className="cg-field">
@@ -189,10 +204,10 @@ export function BoardEditor({ boards, onSave }: { boards: Board[]; onSave: (b: B
         + Add board
       </button>
       <div className="cg-savebar">
-        <button className="cg-btn primary block" onClick={save} disabled={status === 'saving'}>
+        <button className="cg-btn primary block" onClick={save} disabled={status === 'saving' || nameless.length > 0} aria-describedby="cg-save-msg">
           Save and send to patient
         </button>
-        <p className={`cg-save-status ${tone}`} role="status">{message}</p>
+        <p id="cg-save-msg" className={`cg-save-status ${tone}`} role="status">{message}</p>
       </div>
     </div>
   )

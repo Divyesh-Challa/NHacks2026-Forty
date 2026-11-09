@@ -1,6 +1,6 @@
 // Caregiver screen (mobile-friendly): login, live alerts, history, phrase editor, reliability chart.
 // Styles live in ./caregiver.css (same look as the /demo console: true-black, yellow data, red for HELP only).
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BoardEditor } from '../components/BoardEditor'
 import { alertsUnlocked, playHelpAlert, unlockAlerts } from '../lib/alertSound'
 import { ReliabilityChart, type ReliabilityPoint } from '../components/ReliabilityChart'
@@ -104,8 +104,15 @@ function Login({ onLogin }: { onLogin: (token: string, patientId: string) => voi
             setBusy(true)
             login(email, password)
               .then((r) => onLogin(r.token, r.patient_id))
-              .catch(() => {
-                setError('Login failed')
+              .catch((e: unknown) => {
+                // json() throws "401 /auth/login" for a wrong password, a TypeError when fetch never got an answer.
+                setError(
+                  e instanceof TypeError
+                    ? 'Can’t reach Relay. Check the phone is on the same network and the address is right.'
+                    : e instanceof Error && e.message.startsWith('401')
+                      ? 'Login failed. Check your email and password and try again.'
+                      : 'Login failed. Relay answered with an error, try again in a moment.',
+                )
                 setBusy(false)
               })
           }}
@@ -126,7 +133,7 @@ function Login({ onLogin }: { onLogin: (token: string, patientId: string) => voi
           </label>
           {error && (
             <p className="cg-error error" role="alert">
-              <strong>{error}</strong>. Check your email and password and try again.
+              {error}
             </p>
           )}
           <button type="submit" className="cg-btn primary block" disabled={busy}>
@@ -146,7 +153,8 @@ export default function Caregiver() {
   const [live, setLive] = useState<FeedRow[]>([])
   const [history, setHistory] = useState<FeedRow[]>([])
   const [historyState, setHistoryState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [reload, setReload] = useState(0)
+  const wasDown = useRef(false) // a drop was seen since the last (re)connect
+  const everUp = useRef(false)
   const [boards, setBoards] = useState<Board[]>([])
   const [points, setPoints] = useState<ReliabilityPoint[]>([])
   const [mode, setMode] = useState<string>('')
@@ -163,8 +171,20 @@ export default function Caregiver() {
     setSoundOn(true)
     if (notifyState === 'default') Notification.requestPermission().then(setNotifyState)
   }
+  // Nothing from one login may show on the next (another caregiver or patient).
+  const resetSession = () => {
+    setHistory([])
+    setHistoryState('loading')
+    setLive([])
+    setPoints([])
+    setMode('')
+    setUrgentAt(null)
+    everUp.current = false
+    wasDown.current = false
+  }
   const logout = useCallback(() => {
     localStorage.removeItem('relay_token')
+    resetSession()
     setToken(null)
   }, [])
 
@@ -172,7 +192,7 @@ export default function Caregiver() {
     if (e instanceof Unauthorized) logout()
   }, [logout])
 
-  useEffect(() => {
+  const loadHistory = useCallback(() => {
     if (!token) return
     getMessages(patientId, token)
       .then((h) => {
@@ -183,11 +203,31 @@ export default function Caregiver() {
         onAuthError(e)
         setHistoryState('error')
       })
+  }, [token, patientId, onAuthError])
+
+  useEffect(() => {
+    if (!token) return
+    loadHistory()
     getBoards(patientId).then(setBoards).catch(() => {})
     getConfig()
       .then((c) => setCutoff(c.input.reliability_cutoff))
       .catch(() => {})
-  }, [token, patientId, onAuthError, reload])
+  }, [token, patientId, loadHistory])
+
+  // The backend does not replay what was sent while the socket was down. After a reconnect, refetch
+  // history so a HELP sent during the drop still shows up there (it will not sound).
+  useEffect(() => {
+    if (!token) return
+    if (!connected) {
+      if (everUp.current) wasDown.current = true
+    } else {
+      everUp.current = true
+      if (wasDown.current) {
+        wasDown.current = false
+        loadHistory()
+      }
+    }
+  }, [connected, token, loadHistory])
 
   useEffect(() => {
     if (!token) return
@@ -217,6 +257,7 @@ export default function Caregiver() {
     return (
       <Login
         onLogin={(t, pid) => {
+          resetSession()
           localStorage.setItem('relay_token', t)
           localStorage.setItem('relay_patient', pid)
           setSoundOn(true) // the login tap unlocked audio
@@ -234,12 +275,18 @@ export default function Caregiver() {
 
   // Alert card headline: connection first, because "all quiet" while disconnected would be a lie.
   const status = !connected
-    ? { cls: 'warn', head: 'Reconnecting…', sub: 'HELP alerts cannot reach this phone until the connection returns.' }
+    ? { cls: 'warn', head: 'Reconnecting…', sub: 'HELP alerts sent meanwhile will show in History, but won’t sound.' }
     : urgentAt
       ? { cls: 'help', head: 'HELP requested', sub: `At ${clock(urgentAt)}. Tap the red bar to acknowledge.` }
       : lastHelp
         ? { cls: '', head: `Last HELP ${clock(lastHelp.at)}`, sub: 'Acknowledged. You will be alerted again if there is another.' }
-        : { cls: '', head: 'No HELP requests', sub: 'This phone will sound and vibrate the moment one arrives.' }
+        : {
+            cls: '',
+            head: 'No HELP requests',
+            sub: soundOn
+              ? 'This phone will sound and vibrate the moment one arrives.'
+              : 'Alert sound is off. Use the enable button above so this phone can sound when one arrives.',
+          }
 
   return (
     <div className="cg">
@@ -269,7 +316,7 @@ export default function Caregiver() {
           <h1>Patient {patientId} · demo</h1>
           <p className={connected ? '' : 'warn'}>
             {!connected
-              ? 'Reconnecting. HELP alerts are paused.'
+              ? 'Reconnecting. HELP alerts sent meanwhile will show in History, but won’t sound.'
               : modeKnown
                 ? `Controls are in ${mode} mode.`
                 : 'Waiting for the first signal reading.'}
@@ -317,14 +364,23 @@ export default function Caregiver() {
                 <ul className="cg-ready">
                   <li>
                     Alert sound
-                    <b className={soundOn ? '' : 'off'}>{soundOn ? 'On' : 'Tap to enable'}</b>
+                    {soundOn ? <b>On</b> : <button className="cg-linkbtn" onClick={enableAlerts}>Tap to enable</button>}
                   </li>
                   <li>
                     Notifications
-                    <b className={notifyState === 'granted' ? '' : 'off'}>
-                      {notifyState === 'granted' ? 'On' : notifyState === 'denied' ? 'Blocked in browser' : notifyState === 'unavailable' ? 'Needs HTTPS' : 'Tap to enable'}
-                      {notifyState === 'unavailable' && <small>Sound and vibration still work.</small>}
-                    </b>
+                    {notifyState === 'granted' ? (
+                      <b>On</b>
+                    ) : notifyState === 'default' ? (
+                      <button className="cg-linkbtn" onClick={enableAlerts}>Tap to enable</button>
+                    ) : (
+                      <b className="off">{notifyState === 'denied' ? 'Blocked in browser' : 'Needs HTTPS'}</b>
+                    )}
+                    {notifyState === 'unavailable' && (
+                      <small>
+                        Run <code>make frontend-https</code> and open the https Network URL. Sound and vibration still work.
+                      </small>
+                    )}
+                    {notifyState === 'denied' && <small>Allow notifications for this site in the browser settings.</small>}
                   </li>
                 </ul>
               </section>
@@ -363,7 +419,7 @@ export default function Caregiver() {
                   <br />
                   <button className="cg-btn quiet" onClick={() => {
                       setHistoryState('loading')
-                      setReload((n) => n + 1)
+                      loadHistory()
                     }}>Try again</button>
                 </div>
               ) : !history.length ? (
