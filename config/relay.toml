@@ -7,6 +7,7 @@ reliability_cutoff = 0.6     # below this a signal is unreliable
 recover_cutoff = 0.75        # must stay at/above this to switch back (hysteresis)
 remap_window = 10            # attempts below cutoff before remapping
 recover_window = 20          # attempts above recover_cutoff before switching back
+merge_window = 12            # maximum reliability messages to combine related remap banners
 debounce_ms = 300            # ignore duplicate commands within this window
 
 [ui]

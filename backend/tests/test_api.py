@@ -128,3 +128,32 @@ def test_caregiver_ws_rejects_missing_token(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/caregiver/p1") as ws:
             ws.receive_json()
+
+
+def test_signal_reliability_survives_loss_and_recovery(client: TestClient) -> None:
+    # Production config must work through the real ASGI route, not just hand-built test configs.
+    from app.config import INPUT
+
+    pid = 'reliability-regression'
+    with client.websocket_connect(f'/ws/patient/{pid}') as patient:
+        patient.receive_json()
+        with client.websocket_connect(f'/ws/signal?patient_id={pid}') as sig:
+            def reading(eyes: float) -> list[dict]:
+                sig.send_json({'type': 'reliability', 'signals': {'eog_h': eyes, 'eog_v': eyes, 'blink': .9}, 'ts': 0})
+                messages = [patient.receive_json()]
+                if messages[0]['type'] == 'mode_change':
+                    messages.append(patient.receive_json())
+                assert messages[-1]['type'] == 'reliability'
+                return messages
+
+            assert reading(.9)[-1]['mode'] == 'wheel'
+            messages = []
+            for _ in range(INPUT['remap_window']):
+                messages += reading(.3)
+            assert [m['to'] for m in messages if m['type'] == 'mode_change'] == ['scan']
+            messages = []
+            for _ in range(INPUT['recover_window']):
+                messages += reading(.9)
+            assert [m['to'] for m in messages if m['type'] == 'mode_change'] == ['wheel']
+            sig.send_json({'type': 'gesture', 'source': 'blink', 'gesture': 'blink_double', 'confidence': .9, 'ts': 1000})
+            assert patient.receive_json()['command'] == 'SELECT'
