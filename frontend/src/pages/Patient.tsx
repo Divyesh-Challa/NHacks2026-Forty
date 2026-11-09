@@ -229,7 +229,6 @@ export default function Patient() {
         <span className="status">
           {controls.map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`).join(' · ')}
           {controls.length ? ' · ' : ''}
-          {demo ? `demo: ${demo} · ` : ''}
           {mode} · aid {aidOn ? 'on' : 'off'} · {flickOn ? 'mouse flick on · ' : ''}
           {connected ? 'online' : 'offline'}
         </span>
