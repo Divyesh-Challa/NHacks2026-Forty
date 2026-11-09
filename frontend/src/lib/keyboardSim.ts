@@ -1,6 +1,7 @@
 // Keyboard simulator — drives the UI with no hardware and no backend.
 //   ←/→/↑/↓ = LEFT/RIGHT/UP/DOWN (the four looks), B = ACCEPT (double blink), Space = SELECT (double blink),
-//   Backspace = BACK, hold H (2 s) = HELP, M = toggle wheel/scan, F = mouse-flick sim, A = audio aid
+//   Backspace = BACK, hold H (2 s) = HELP, M = toggle wheel/scan, F = mouse-flick sim, A = audio aid,
+//   1-9 = guided demo scenario, 0 = guide off
 import type { Command } from './types'
 
 const HELP_HOLD_MS = 2000
@@ -17,7 +18,7 @@ const KEYS: Record<string, Command> = {
 
 export function attachKeyboardSim(
   onCommand: (c: Command) => void,
-  toggles: { mode(): void; flick(): void; aid(): void },
+  toggles: { mode(): void; flick(): void; aid(): void; demo(n: number): void },
 ): () => void {
   let helpTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -30,6 +31,7 @@ export function attachKeyboardSim(
     else if (key === 'm') toggles.mode()
     else if (key === 'f') toggles.flick()
     else if (key === 'a') toggles.aid()
+    else if (/^[0-9]$/.test(key)) toggles.demo(Number(key))
     else return
     e.preventDefault()
   }
