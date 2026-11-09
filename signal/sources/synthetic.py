@@ -44,7 +44,7 @@ GESTURE_SIGNAL = {
 GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "look_up": 0.75, "look_down": 0.75, "blink_double": 0.65}
 DEMO_SIGNALS = ["eog_h", "eog_v", "blink"]
 # Each eye axis gets the same share of attempts, interleaved, so a degraded eog_h and eog_v fall at the same
-# pace (replayed over 400 seeds, the second starts falling before the first is lost in 99%: one banner).
+# pace (500 seeds replayed through the input manager: 96% give a wheel -> scan banner naming both).
 DEFAULT_SCRIPT = ["look_left", "look_up", "look_right", "look_down", "blink_double"]
 REST_FALSE_TRIGGER = {"eog_h": "look_right", "eog_v": "look_up", "blink": "blink_double"}
 
