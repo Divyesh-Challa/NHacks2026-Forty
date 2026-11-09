@@ -167,3 +167,16 @@ def test_accepted_candidate_backs_up_previous_calibration(tmp_path, monkeypatch)
     calibration.main()
     assert json.loads((tmp_path / 'calibration.json').read_text()) == candidate
     assert (tmp_path / 'calibration.prev.json').read_text() == active
+
+
+def test_sparse_rest_spikes_do_not_set_background_threshold() -> None:
+    from calibration import rest_noise
+
+    rng = np.random.default_rng(23)
+    quiet = 512 + rng.normal(0, 5, 500)
+    blinking = quiet.copy()
+    blinking[100:125] += 350
+    blinking[125:150] -= 250
+    assert 4 < rest_noise(quiet) < 6
+    assert rest_noise(blinking) < 7
+    assert rest_noise(512 + rng.normal(0, 40, 500)) > 30

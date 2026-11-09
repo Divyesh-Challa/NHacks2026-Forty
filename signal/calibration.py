@@ -76,6 +76,15 @@ def first_movement(d: np.ndarray, noise: float, fs: float) -> float | None:
     return None
 
 
+def rest_noise(x: np.ndarray) -> float:
+    """Robust background scale in ADC counts; sparse blink/contact spikes are not background.
+
+    1.4826 converts median absolute deviation to a Gaussian standard-deviation estimate. Transient
+    peaks are reported separately and still count as false commands in the full live evaluation.
+    """
+    return float(1.4826 * np.median(np.abs(x - np.median(x))))
+
+
 def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     """Amplitudes and rest noise of each feature, before any thresholds."""
     t = rows[:, 0]
@@ -103,6 +112,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
             blink.append(float(np.max(v[w] - np.median(v[p]))))
 
     rest_h, rest_v, rest_va = [], [], []
+    background_h, background_v = [], []
     for label, a, b in segs:
         if label != "rest":
             continue
@@ -115,6 +125,8 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
             rest_h.append(float(np.max(np.abs(h[w] - np.median(h[w])))))
             rest_v.append(float(np.max(v[w] - np.median(v[w]))))
             rest_va.append(float(np.max(np.abs(v[w] - np.median(v[w])))))
+            background_h.append(rest_noise(h[w]))
+            background_v.append(rest_noise(v[w]))
 
     def polarity(samples: dict, negative: str, positive: str) -> tuple[bool, float]:
         votes = [x < 0 for x in samples[negative]] + [x > 0 for x in samples[positive]]
@@ -138,8 +150,9 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
             "eog_v": float(np.median(vert_amps)) if vert_amps else None,
             "blink": float(np.median(blink)) if blink else None,
         },
-        # Median vertical rest chunks reduce contamination from occasional spontaneous blinks.
-        "noise": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_v, 50)},
+        "rest_seconds_measured": len(background_h),
+        "noise": {"eog_h": pct(background_h, 50), "eog_v": pct(background_v, 50), "blink": pct(background_v, 50)},
+        "rest_transient_peak": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_v, 50)},
     }
 
 
@@ -229,10 +242,13 @@ def calibrate(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
         signals[sig]["amplitude"] = m["amplitude"][sig] and round(m["amplitude"][sig], 1)
         signals[sig]["noise"] = round(m["noise"][sig], 1)
     warnings = rail_warnings(rows)
+    if m["rest_seconds_measured"] < 5:
+        warnings.append("WARNING: fewer than five seconds of initial rest remain after settling. Record a longer initial rest before calibrating.")
     for sig, gestures in (("eog_h", ["look_left", "look_right"]), ("eog_v", ["look_up", "look_down"])):
         present = any(g in labels for g in gestures)
         if present and (m["polarity_agreement"][sig] < .8 or any(m["direction_counts"][g] < 2 for g in gestures)):
-            warnings.append(f"WARNING: {sig} polarity is ambiguous or has fewer than two usable movements per direction. Repeat calibration with clear looks and returns.")
+            counts = ', '.join(f"{g}={m['direction_counts'][g]}" for g in gestures)
+            warnings.append(f"WARNING: {sig} polarity needs at least 80% agreement and two usable movements per direction; got {m['polarity_agreement'][sig]:.0%} agreement, {counts}. Repeat calibration with clear looks and returns.")
         for g in gestures:
             amp = m["direction_amplitudes"].get(g)
             if amp and 2 * m["noise"][sig] >= amp:
@@ -314,6 +330,9 @@ def report(result: dict) -> str:
     for g in ("look_left", "look_right", "look_up", "look_down"):
         if f"{g}_threshold" in s:
             lines.append(f"  {g}: threshold {s[g + '_threshold']}, floor {s[g + '_floor']}")
+    transient = result.get("measurement", {}).get("rest_transient_peak")
+    if transient:
+        lines.append(f"Rest transient peaks (not background noise): horizontal {transient['eog_h']:.1f}, vertical {transient['eog_v']:.1f}. Extras and rest false triggers still include their effects.")
     return "\n".join(lines)
 
 
