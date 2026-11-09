@@ -52,7 +52,7 @@ prompts = list(SAY) * args.reps
 random.shuffle(prompts)
 
 rows_all: list[np.ndarray] = []
-events: list[tuple[float, str]] = []  # (wall seconds, gesture)
+events: list[tuple[int, str]] = []  # (device microseconds, gesture), independent of delivery delay
 windows: list[tuple[str, float, float]] = []  # (prompt, start, end)
 row_marks: list[int] = []  # rows received when each prompt started
 row_count = 0
@@ -66,7 +66,7 @@ def pump() -> None:
         rows_all.append(rows)
         for e in pipe.process(rows):
             if isinstance(e, Detection):
-                events.append((time.monotonic(), e.gesture))
+                events.append((e.ts * 1000, e.gesture))
                 if cues:
                     cues.send(type="seen", text=SEEN.get(e.gesture, e.gesture))
 
@@ -101,11 +101,19 @@ for n, g in enumerate(prompts):
         time.sleep(0.005)
     windows.append((g, start, start + args.gap))
 
-time.sleep(0.5)
-pump()
+# Keep pumping while delayed vertical arbitration completes, including the final trial.
+drain_until = time.monotonic() + 1.2
+while time.monotonic() < drain_until:
+    pump()
+    time.sleep(.005)
+
+rows = np.vstack(rows_all)
+trial_bounds = [int(rows[i, 0]) for i in row_marks]
+# Final trial ends before the drain period; delayed detections retain their original device time.
+trial_ends = trial_bounds[1:] + [trial_bounds[-1] + int(args.gap * 1e6)]
 
 conf: dict[str, Counter] = defaultdict(Counter)
-for g, a, b in windows:
+for (g, _, _), a, b in zip(windows, trial_bounds, trial_ends):
     got = [x for ts, x in events if a <= ts < b]
     key = tuple(got) if got else ("(nothing)",)
     conf[g][key] += 1
@@ -117,7 +125,6 @@ print(f"\nexactly one correct detection: {exact}/{len(windows)}")
 
 # Save the session (labelled like record.py) for offline replay: a prompt owns the next 2.0 s of rows.
 out = f"recordings/live-{datetime.now():%Y%m%d-%H%M%S}.csv"
-rows = np.vstack(rows_all)
 labels = ["rest"] * len(rows)
 for (g, _a, _b), i0 in zip(windows, row_marks):
     for i in range(i0, min(len(rows), i0 + 1000)):
@@ -128,5 +135,10 @@ with open(out, "w", newline="") as f:
     for r, label in zip(rows, labels):
         w.writerow([*r.tolist(), label])
 print("saved", out)
+with open(out.removesuffix('.csv') + '.json', 'w') as f:
+    json.dump({'settings': settings, 'gap_seconds': args.gap,
+               'trials': [{'gesture': g, 'start_us': a, 'end_us': b} for (g, _, _), a, b in zip(windows, trial_bounds, trial_ends)],
+               'detections': [{'ts_us': ts, 'gesture': g} for ts, g in events],
+               'exact': exact, 'total': len(windows)}, f, indent=2)
 if cues:
     cues.send(type="done")

@@ -77,3 +77,93 @@ def test_rail_warning_flags_a_saturating_channel() -> None:
     bad = rows.copy()
     bad[: len(bad) // 10, 1] = 1020  # A0 pinned at the top rail for 10% of the run
     assert len(rail_warnings(bad)) == 1 and "A0" in rail_warnings(bad)[0]
+
+
+def test_first_movement_ignores_larger_opposite_return() -> None:
+    from calibration import first_movement
+
+    d = np.zeros(1000)
+    d[100:200] = -60
+    d[650:750] = 180
+    assert first_movement(d, noise=2, fs=500) == -60
+
+
+def test_calibration_scores_wrong_extras_as_errors(monkeypatch) -> None:
+    import calibration
+    from detectors import Detection
+
+    class FakePipeline:
+        def __init__(self, *args):
+            pass
+
+        def process(self, rows):
+            return [Detection('eog_h', 'look_left', 1, 100), Detection('eog_v', 'look_up', 1, 120)] if rows[0, 0] == 0 else []
+
+    monkeypatch.setattr(calibration, 'Pipeline', FakePipeline)
+    rows = np.column_stack([np.arange(500) * 2000, np.full((500, 3), 512)])
+    r = calibration.evaluate(rows, ['look_left'] * 500, {})['eog_h']
+    assert r['accuracy'] == 0 and r['hits'] == 1 and r['extra_commands'] == 1
+
+
+def test_direction_thresholds_are_independent(monkeypatch) -> None:
+    import calibration
+
+    monkeypatch.setattr(calibration, 'DETECTOR_OVERRIDES', {})
+    m = {'eog_invert': False, 'vert_invert': False,
+         'amplitude': {'eog_h': 100, 'eog_v': 80, 'blink': 300},
+         'noise': {'eog_h': 5, 'eog_v': 5, 'blink': 5},
+         'direction_amplitudes': {'look_up': 100, 'look_down': 40}}
+    s = calibration.thresholds(m)
+    assert s['look_up_threshold'] == 50 and s['look_down_threshold'] == 20
+
+
+def test_ambiguous_polarity_rejects_candidate(monkeypatch) -> None:
+    import calibration
+
+    rows, labels = synthetic_session(reps=4, seed=8)
+    original = calibration.measure
+
+    def ambiguous(*args):
+        m = original(*args)
+        m['polarity_agreement']['eog_h'] = .5
+        return m
+
+    monkeypatch.setattr(calibration, 'measure', ambiguous)
+    result = calibrate(rows, labels)
+    assert not result['valid']
+    assert any('polarity' in w for w in result['warnings'])
+
+
+def test_rejected_candidate_preserves_active_calibration(tmp_path, monkeypatch) -> None:
+    import json
+    import calibration
+
+    monkeypatch.setattr(calibration, 'HERE', tmp_path)
+    monkeypatch.setattr(calibration, 'CAL_PATH', tmp_path / 'calibration.json')
+    active = '{"existing": true}'
+    (tmp_path / 'calibration.json').write_text(active)
+    monkeypatch.setattr(calibration, 'synthetic_session', lambda *args: (None, None))
+    monkeypatch.setattr(calibration, 'calibrate', lambda *args: {'valid': False, 'warnings': ['bad contact']})
+    monkeypatch.setattr(calibration, 'report', lambda *args: 'rejected')
+    monkeypatch.setattr('sys.argv', ['calibration.py', '--no-post'])
+    calibration.main()
+    assert (tmp_path / 'calibration.json').read_text() == active
+    assert json.loads(next((tmp_path / 'recordings').glob('*.json')).read_text())['valid'] is False
+
+
+def test_accepted_candidate_backs_up_previous_calibration(tmp_path, monkeypatch) -> None:
+    import json
+    import calibration
+
+    monkeypatch.setattr(calibration, 'HERE', tmp_path)
+    monkeypatch.setattr(calibration, 'CAL_PATH', tmp_path / 'calibration.json')
+    active = '{"existing": true}'
+    (tmp_path / 'calibration.json').write_text(active)
+    candidate = {'valid': True, 'warnings': []}
+    monkeypatch.setattr(calibration, 'synthetic_session', lambda *args: (None, None))
+    monkeypatch.setattr(calibration, 'calibrate', lambda *args: candidate)
+    monkeypatch.setattr(calibration, 'report', lambda *args: 'accepted')
+    monkeypatch.setattr('sys.argv', ['calibration.py', '--no-post'])
+    calibration.main()
+    assert json.loads((tmp_path / 'calibration.json').read_text()) == candidate
+    assert (tmp_path / 'calibration.prev.json').read_text() == active
