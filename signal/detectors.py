@@ -241,7 +241,7 @@ class VerticalEogDetector:
             self.pending
             and start - self.pending[0] <= self.pair_us
             and peak >= 0.35 * self.pending[1]
-            and self.pending[1] >= self.blink_min  # only a blink-sized spike has a blink's trough;
+            and self.pending[1] >= self.blink_min * self.gain  # only a blink-sized spike has a blink's trough;
         ):  # a small look-up pulse is followed by an equally small negative swing (measured: ~60 / ~45)
             self.pending = None  # the trough after a blink spike
             return []
