@@ -78,9 +78,12 @@ class SyntheticRows:
         return self.exg.chunk(self.n)
 
 
-def test_eye_degrade_lowers_both_eye_signals_through_the_real_detectors() -> None:
+def test_eye_degrade_lowers_both_eye_signals_through_the_real_detectors(monkeypatch) -> None:
     """run.py --detectors real: an "eye" degrade must take eog_v down with eog_h (the wheel needs both)."""
-    src = PipelineSource(SyntheticRows(2.0, seed=6), calibration=calibrate(*synthetic_session(reps=4, seed=4)))
+    import calibration
+
+    monkeypatch.setattr(calibration, "DETECTOR_OVERRIDES", {})  # pins are for the rig, not synthetic amplitudes
+    src =PipelineSource(SyntheticRows(2.0, seed=6), calibration=calibrate(*synthetic_session(reps=4, seed=4)))
     first = src.reliability()["signals"]
     assert set(first) == {"eog_h", "eog_v", "blink"}
     src.degrade("eye", 0.3)
@@ -92,3 +95,21 @@ def test_eye_degrade_lowers_both_eye_signals_through_the_real_detectors() -> Non
     assert r["blink"] >= 0.75
     src.degrade("eye", 1.0)
     assert not src.pipeline.vert.misses
+
+
+def test_pinned_overrides_survive_calibration(monkeypatch) -> None:
+    import calibration
+
+    monkeypatch.setattr(calibration, "DETECTOR_OVERRIDES", {"vert_threshold": 28.0, "vert_rearm_ms": 0})
+    s = calibrate(*synthetic_session(reps=4, seed=6))["settings"]
+    assert s["vert_threshold"] == 28.0 and s["vert_rearm_ms"] == 0
+
+
+def test_rail_warning_flags_a_saturating_channel() -> None:
+    from calibration import rail_warnings
+
+    rows, _ = synthetic_session(reps=2, seed=7)
+    assert rail_warnings(rows) == []
+    bad = rows.copy()
+    bad[: len(bad) // 10, 1] = 1020  # A0 pinned at the top rail for 10% of the run
+    assert len(rail_warnings(bad)) == 1 and "A0" in rail_warnings(bad)[0]

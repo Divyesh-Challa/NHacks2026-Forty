@@ -1,4 +1,4 @@
-.PHONY: gates setup backend signal signal-keyboard signal-hw plot calibrate calibrate-cue frontend frontend-https test demo-check
+.PHONY: gates setup backend signal signal-keyboard signal-hw plot calibrate calibrate-cue live-test frontend frontend-https test demo-check
 
 setup:
 	cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -30,6 +30,10 @@ calibrate:
 # Cue-driven calibration on the /calibrate page (dot + voice): make calibrate-cue PORT=/dev/cu.usbmodem1101
 calibrate-cue:
 	cd signal && .venv/bin/python calibration.py --source serial --port $(PORT) --cue
+
+# Shuffled-prompt check of the current calibration (30 prompts on the /calibrate page): make live-test PORT=/dev/cu.usbmodem1101
+live-test:
+	cd signal && .venv/bin/python -m tools.live_confusion --port $(PORT)
 
 frontend:
 	cd frontend && npm run dev

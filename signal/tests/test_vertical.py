@@ -83,7 +83,8 @@ def test_bounce_after_a_look_up_does_not_fire_a_second_look_up() -> None:
     a1 = trace((3, 0.1, 60), (3.12, 0.15, -45), (4.45, 0.08, -32), (4.55, 0.09, 30))
     n = len(a1)
     rows = np.column_stack([np.arange(n) * 2000, np.full(n, 512), a1, np.full(n, 500)])
-    p = Pipeline(settings={"vert_threshold": 26.0, "vert_floor": 13.0, "vert_invert": False})
+    # The rearm window is what blocks this bounce; it is off by default now (relay.toml), so turn it on here.
+    p = Pipeline(settings={"vert_threshold": 26.0, "vert_floor": 13.0, "vert_invert": False, "vert_rearm_ms": 2500})
     events = []
     for i in range(0, n, 50):
         events += p.process(rows[i : i + 50])
@@ -185,4 +186,10 @@ def test_return_from_down_with_a_small_tail_is_not_a_look_up() -> None:
 def test_return_dip_two_seconds_after_an_up_still_resets_the_zone() -> None:
     # The dip 1.8 s after an up is the return; if it were treated as a bounce the next real down would be swallowed.
     a1 = trace((1, 0.1, 90), (1.12, 0.2, -35), (2.9, 0.1, -50), (5.0, 0.1, -60))
+    assert rig_gestures(a1) == [("eog_v", "look_up"), ("eog_v", "look_down")]
+
+
+def test_a_down_well_after_an_up_is_a_new_look_not_the_return() -> None:
+    # Log: look_down peak=61 dropped with zone +1. The return from an up arrives ~2.5 s later; a down at 4.5 s is a look.
+    a1 = trace((1, 0.1, 90), (1.12, 0.2, -35), (5.5, 0.1, -60))
     assert rig_gestures(a1) == [("eog_v", "look_up"), ("eog_v", "look_down")]

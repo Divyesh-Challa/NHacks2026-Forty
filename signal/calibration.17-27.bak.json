@@ -1,0 +1,56 @@
+{
+  "created": "2026-11-08T17:27:37",
+  "settings": {
+    "eog_threshold": 1219.73,
+    "eog_floor": 792.82,
+    "eog_invert": false,
+    "eog_confirm_ms": 60,
+    "eog_rearm_ms": 0,
+    "blink_threshold": 143.45,
+    "blink_floor": 71.72,
+    "blink_max_ms": 400,
+    "double_blink_ms": 700,
+    "vert_threshold": 28.0,
+    "vert_floor": 14.0,
+    "vert_invert": false,
+    "look_return_hold_ms": 6000,
+    "vert_h_guard_ms": 700,
+    "vert_pair_ms": 350,
+    "vert_rearm_ms": 0,
+    "vert_return_hold_ms": 3500,
+    "look_repeat_guard_ms": 3000,
+    "max_excursion_s": 5.0,
+    "eog_unit": 124.11,
+    "vert_unit": 41.82,
+    "blink_unit": 286.89
+  },
+  "signals": {
+    "eog_h": {
+      "accuracy": 0.0,
+      "false_trigger_rate": 0.0,
+      "reliability": 0.0,
+      "attempts": 20,
+      "rest_seconds": 67,
+      "amplitude": 124.1,
+      "noise": 609.9
+    },
+    "eog_v": {
+      "accuracy": 0.5,
+      "false_trigger_rate": 0.254,
+      "reliability": 0.373,
+      "attempts": 20,
+      "rest_seconds": 67,
+      "amplitude": 41.8,
+      "noise": 12.8
+    },
+    "blink": {
+      "accuracy": 0.6,
+      "false_trigger_rate": 0.0,
+      "reliability": 0.6,
+      "attempts": 10,
+      "rest_seconds": 67,
+      "amplitude": 286.9,
+      "noise": 12.1
+    }
+  }
+}

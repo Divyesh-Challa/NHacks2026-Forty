@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from config import BACKEND_WS_URL, DETECTORS
+from config import BACKEND_WS_URL, DETECTOR_OVERRIDES, DETECTORS
 from detectors import Detection, Pipeline
 from filters import FS
 from reliability import score
@@ -43,6 +43,7 @@ SIGNAL_GESTURES = {
 }
 MATCH_SLACK_US = 800_000  # a detection up to this long after the window still counts 
 REST_SKIP_US = 1_000_000  # ignore the first second of rest after a prompt (eyes returning, late release)
+SETTLE_US = 8_000_000  # fresh electrodes swing rail to rail for several seconds (AC-coupled pill settling); not noise
 
 
 def segments(t_us: np.ndarray, labels: list[str]) -> list[tuple[str, int, int]]:
@@ -91,7 +92,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     for label, a, b in segs:
         if label != "rest":
             continue
-        a = a if a == segs[0][1] else a + REST_SKIP_US
+        a = a + SETTLE_US if a == segs[0][1] else a + REST_SKIP_US
         for c in range(a, b - 1_000_000 + 1, 1_000_000):
             w = _window(t, c, c + 1_000_000)
             rest_h.append(float(np.max(np.abs(h[w] - np.median(h[w])))))
@@ -119,6 +120,17 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     }
 
 
+def rail_warnings(rows: np.ndarray, limit: float = 0.01) -> list[str]:
+    """A channel pinned at the ADC rails is a contact/saturation problem, not a threshold problem."""
+    out = []
+    for i, name in ((1, "A0 (horizontal)"), (2, "A1 (vertical/blink)")):
+        x = rows[:, i]
+        frac = float(np.mean((x <= 8) | (x >= 1015)))
+        if frac > limit:
+            out.append(f"WARNING: {name} hit the ADC limit {frac:.0%} of the time. Check that electrode's contact (skin prep, gel, lead strain) and recalibrate; thresholds from this run are not trustworthy.")
+    return out
+
+
 def thresholds(m: dict) -> dict:
     """Detector settings from measured amplitudes (keeps the defaults for anything not measured)."""
     s = dict(DETECTORS)
@@ -133,6 +145,7 @@ def thresholds(m: dict) -> dict:
         if key in ("eog", "vert", "blink"):
             s[f"{key}_unit"] = round(amp, 2)  # size of one gesture; the zone tracker and blink-vs-look rule use these
         s[f"{key}_floor"] = round(min(max(0.25 * amp, 1.3 * noise), 0.8 * thr), 2)
+    s.update(DETECTOR_OVERRIDES)  # pinned in relay.toml [detector_overrides]; survive every recalibration
     return s
 
 
@@ -155,7 +168,7 @@ def evaluate(rows: np.ndarray, labels: list[str], settings: dict, fs: float = FS
         for label, a, b in segs:
             if label != "rest":
                 continue
-            a = a if a == segs[0][1] else a + REST_SKIP_US
+            a = a + SETTLE_US if a == segs[0][1] else a + REST_SKIP_US
             for c in range(a, b - 1_000_000 + 1, 1_000_000):
                 rest_s += 1
                 triggered += any(d.source == sig and c <= d.ts * 1000 < c + 1_000_000 for d in detections)
@@ -270,6 +283,8 @@ def main() -> None:
 
     result = calibrate(rows, labels)
     print(report(result))
+    for w in rail_warnings(rows):
+        print(w)
     CAL_PATH.write_text(json.dumps(result, indent=2))
     log = HERE / "recordings" / f"calibration-{datetime.now():%Y%m%d-%H%M%S}.json"
     log.parent.mkdir(exist_ok=True)
