@@ -24,11 +24,18 @@ ROOT = Path(__file__).resolve().parents[1]
 PATIENT = "p1"
 PASSWORD = "demo-check-password"
 RELIABILITY_HZ = 20  # faster than the real ~1 Hz so the 10-reading remap takes ~0.5 s
-# Readings by which a degrade reaches each signal. The real detectors never lose eog_h and blink on
-# the same reading, so blink trails: the stage banner must still be one split -> scan change.
-LAG = {"blink": 3}
-EYE_TO_JAW = "Eye movement and blinking reliability fell below 60%. Switching to scan mode with jaw clench to select."
-EYE_BACK = "Eye movement and blinking are reliable again. Switching back to eye movement."
+# Readings by which a degrade reaches each signal. "eye" degrades the looks (eog_h + eog_v) and the
+# real detectors never lose both on the same reading, so eog_v trails: the stage banner must still be
+# one wheel -> scan change, with double blink (left strong) as SELECT.
+LAG = {"eog_v": 3}
+EYES_TO_BLINK = (
+    "Eye movement and vertical eye movement reliability fell below 60%. "
+    "Switching to scan mode with double blink to select."
+)
+EYES_BACK = (
+    "Eye movement and vertical eye movement are reliable again. "
+    "Switching back to eye movement with double blink to finish."
+)
 
 
 def free_port() -> int:
@@ -43,6 +50,7 @@ class Signal:
     def __init__(self, ws) -> None:
         self.ws = ws
         self.gain = {"eog_h": 1.0, "eog_v": 1.0, "blink": 1.0}
+        self.pending: list[list] = []  # [readings left, signal, factor]
 
     async def run(self) -> None:
         async def controls() -> None:
@@ -143,7 +151,9 @@ async def main(base: str) -> None:
                 r.raise_for_status()
                 change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "scan", 10, mark)
                 snap = await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "scan", 5, mark)
-                assert snap["mapping"].get("SELECT") == "blink_double", snap["mapping"]
+                assert snap["mapping"] == {"SELECT": "blink_double"}, snap["mapping"]
+                banners = [e for e in patient.events[mark:] if e["type"] == "mode_change"]
+                assert [(e["from"], e["to"], e["reason"]) for e in banners] == [("wheel", "scan", EYES_TO_BLINK)], banners
                 mark = len(patient.events)
                 await signal.gesture("eog_h", "look_left")  # degraded signal: must be ignored
                 await signal.gesture("blink", "blink_double")
@@ -165,6 +175,9 @@ async def main(base: str) -> None:
                 mark = len(patient.events)
                 await http.post("/demo/degrade", json={"signal": "eye", "factor": 1.0})
                 change = await patient.wait_for(lambda e: e["type"] == "mode_change" and e["to"] == "wheel", 10, mark)
+                assert change["reason"] == EYES_BACK, change
+                snap = await patient.wait_for(lambda e: e["type"] == "reliability" and e["mode"] == "wheel", 5, mark)
+                assert snap["mapping"]["SELECT"] == "blink_double", snap["mapping"]
                 return f"restored → wheel. “{change['reason']}”"
 
             await step("1. Select a phrase with eye movement", step1())
