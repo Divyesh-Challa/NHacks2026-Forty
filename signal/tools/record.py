@@ -18,7 +18,7 @@ from tools.cue_server import CueServer
 from tools.streams import SyntheticStream, open_stream
 
 GESTURES = ["look_left", "look_right", "blink_double"]
-VERTICAL = ["look_up", "look_down"]  # real hardware only: the synthetic generator has no vertical looks
+VERTICAL = ["look_up", "look_down"]  # hardware sessions only: synthetic dry runs keep the left/right/blink set
 PROMPT_S = 2.0
 REST_S = 2.0
 OUT_DIR = Path(__file__).resolve().parents[1] / "recordings"

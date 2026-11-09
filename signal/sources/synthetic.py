@@ -5,7 +5,7 @@ Two layers:
 1. SyntheticEXG — raw samples in the exact format the Arduino prints (t_us, a0, a1, a2 as 10-bit
    ADC counts; A0 = horizontal EOG, A1 = vertical EOG/blinks, A2 = unused), with ground-truth
    labels. Baseline drift, 60 Hz pickup and white noise are always on; gestures add EOG steps
-   and blink spikes (with a little crosstalk onto the other channel).
+   (left/right on A0, up/down on A1) and blink spikes, with a little crosstalk onto the other channel.
    Use it to test filters/detectors, drive the live plotter, or record labelled CSVs.
 
 2. SyntheticSource.events() — the stream run.py sends to the backend. Until the real detectors
@@ -14,8 +14,10 @@ Two layers:
    signals false-trigger more at rest. Every outcome feeds ReliabilityTracker, so reliability
    falls because gestures are actually being missed, not because a number was set.
 
-degrade(signal, factor) scales the gesture amplitude for that signal ("eog_h", "blink";
+degrade(signal, factor) scales the gesture amplitude for that signal ("eog_h", "eog_v", "blink";
 "eye" = eog_h + eog_v) while the noise stays the same: a fading signal, not a quieter channel.
+The wheel needs both eye signals, so both are simulated and reported, and the script tries looks on
+both axes equally often: an "eye" degrade makes them fall together (one wheel -> scan banner).
 """
 
 import asyncio
@@ -35,11 +37,16 @@ SIGNAL_CHANNEL = {"eog_h": 0, "eog_v": 1, "blink": 1}
 GESTURE_SIGNAL = {
     "look_left": "eog_h",
     "look_right": "eog_h",
+    "look_up": "eog_v",
+    "look_down": "eog_v",
     "blink_double": "blink",
 }
-GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "blink_double": 0.65}
-DEMO_SIGNALS = ["eog_h", "blink"]
-DEFAULT_SCRIPT = ["look_left", "blink_double", "look_right", "blink_double", "look_left", "look_right"]
+GESTURE_SECONDS = {"look_left": 0.75, "look_right": 0.75, "look_up": 0.75, "look_down": 0.75, "blink_double": 0.65}
+DEMO_SIGNALS = ["eog_h", "eog_v", "blink"]
+# Each eye axis gets the same share of attempts, interleaved, so a degraded eog_h and eog_v fall at the same
+# pace (replayed over 400 seeds, the second starts falling before the first is lost in 99%: one banner).
+DEFAULT_SCRIPT = ["look_left", "look_up", "look_right", "look_down", "blink_double"]
+REST_FALSE_TRIGGER = {"eog_h": "look_right", "eog_v": "look_up", "blink": "blink_double"}
 
 
 def degrade_targets(signal: str) -> list[str]:
@@ -112,6 +119,12 @@ class SyntheticEXG:
             shape = np.clip(np.minimum(dt, dur - dt) / ramp, 0, 1)  # trapezoid step
             sign = -1 if gesture == "look_left" else 1
             out[0] = sign * c["saccade"] * self.gain["eog_h"] * shape
+        elif gesture in ("look_up", "look_down"):
+            # Same held step on A1; it outlasts blink_max_ms, so the blink detector ignores it.
+            shape = np.clip(np.minimum(dt, dur - dt) / 0.05, 0, 1)
+            sign = 1 if gesture == "look_up" else -1
+            out[1] = sign * c["vertical"] * self.gain["eog_v"] * shape
+            out[0] = 0.1 * out[1]  # crosstalk
         elif gesture == "blink_double":
             for onset in (0.0, 0.35):
                 d = dt - onset
@@ -197,7 +210,7 @@ class SyntheticSource:
             fired = self.detector.false_triggers(gain)
             self.tracker.record_rest(signal, fired)
             if fired:
-                gesture = {"eog_h": "look_right", "blink": "blink_double"}[signal]
+                gesture = REST_FALSE_TRIGGER[signal]
                 events.append(messages.gesture(signal, gesture, self.detector.confidence(gain) * 0.8))
         return events
 

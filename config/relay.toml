@@ -54,6 +54,7 @@ noise = 4.0                  # white noise (ADC counts, std)
 mains = 6.0                  # 60 Hz pickup amplitude
 drift = 25.0                 # slow baseline wander amplitude
 saccade = 160.0              # look left/right step on A0
+vertical = 200.0             # look up/down step on A1
 blink = 220.0                # blink spike on A1
 
 [predict]
