@@ -19,7 +19,7 @@ export function ModeBanner({ change }: { change: ModeChangeEvent | null }) {
     <div className="mode-banner" role="status">
       <span className="mb-mark" aria-hidden="true" />
       <div className="mb-text">
-        <strong>{change.to === 'scan' ? 'Switching to scan mode' : 'Back to wheel mode'}</strong>
+        <strong>{change.from === change.to ? 'Controls changed' : 'Mode changed'}</strong>
         <span>{change.reason}</span>
       </div>
       <button type="button" className="mb-close" onClick={() => setHiddenFor(change)}>

@@ -37,7 +37,7 @@ export function RadialWheel({
   extras: Target[] // 'finish' / 'help' in scan mode, shown under the wheel
   intervalMs: number
   epoch: number // changes whenever the scan clock restarts
-  acceptHint: string // the gesture that takes the suggestion
+  acceptHint: string | null // the control that takes the suggestion; null when none is mapped
 }) {
   const scanning = highlight !== null || extras.length > 0
   return (
@@ -73,7 +73,7 @@ export function RadialWheel({
           {suggestion ? (
             <span className="cue">
               <span className="tag">Suggested</span>
-              {!scanning && <span className="hint">{acceptHint} to accept</span>}
+              {!scanning && acceptHint && <span className="hint">{acceptHint} to accept</span>}
             </span>
           ) : (
             !scanning && (

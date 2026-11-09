@@ -61,7 +61,8 @@ export default function Patient() {
   const [flickCfg, setFlickCfg] = useState({ flickPx: 160, rearmPx: 50 })
   const [modeChange, setModeChange] = useState<ModeChangeEvent | null>(null)
   const [spoken, setSpoken] = useState<string[]>([])
-  const [helpActive, setHelpActive] = useState(false)
+  // Recorded at send time: the socket drops alerts while it is not open, so a later reconnect must not rewrite it.
+  const [helpActive, setHelpActive] = useState<'sent' | 'unsent' | null>(null)
   const [connected, setConnected] = useState(false)
   const [tickEpoch, setTickEpoch] = useState(0)
   const sock = useRef<RelaySocket | null>(null)
@@ -100,8 +101,8 @@ export default function Patient() {
         } else if (e.kind === 'learn') {
           nextLinks = learn(nextLinks, e.key, e.word, Date.now())
         } else {
-          setHelpActive(true)
-          sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() })
+          const delivered = sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() }) ?? false
+          setHelpActive(delivered ? 'sent' : 'unsent')
         }
       }
       if (nextLinks !== links) {
@@ -216,21 +217,23 @@ export default function Patient() {
       : mode === 'scan'
         ? 'Select when the option you want is lit'
         : 'Look up, right, down or left to choose'
+  const selectLabel = mode === 'scan' || spelling ? 'Select' : 'Finish'
   // Which gesture does what. Without a live mapping (keyboard sim, backend offline) show the keys instead.
   const mapped = [
-    ['Finish', mapping.SELECT],
+    [selectLabel, mapping.SELECT],
     ['Accept', mapping.ACCEPT],
     ['HELP', mapping.HELP],
   ].filter(([, g]) => g)
   const controls = mapped.length
     ? mapped.map(([label, g]) => [label, GESTURE_LABELS[g!] ?? g!])
     : [
-        ['Finish', 'Space'],
+        [selectLabel, 'Space'],
         ['Accept', 'B'],
         ['HELP', 'hold H'],
       ]
   const selectHint = GESTURE_LABELS[mapping.SELECT] ?? 'Space'
-  const acceptHint = GESTURE_LABELS[mapping.ACCEPT] ?? 'double blink'
+  // The backend does not map ACCEPT today: only name a control that exists. Keyboard sim (no mapping at all) has B.
+  const acceptHint = mapping.ACCEPT ? (GESTURE_LABELS[mapping.ACCEPT] ?? mapping.ACCEPT) : mapped.length === 0 ? 'B' : null
   const rb = machine.readback
 
   return (
@@ -270,7 +273,7 @@ export default function Patient() {
       )}
       {!connected && (
         <div className="pt-notice late" role="status">
-          Not connected to Relay. The keyboard still works, but signals and caregiver alerts will not arrive until it reconnects.
+          Not connected to Relay. The keyboard still works, but signals will not arrive and HELP alerts can't be sent while offline.
         </div>
       )}
       <ModeBanner change={modeChange} />
@@ -312,11 +315,11 @@ export default function Patient() {
         {spoken[0] ? <q>{spoken[0]}</q> : <span className="none">Spoken phrases appear here</span>}
       </footer>
       {helpActive && (
-        <div className={`help-overlay${connected ? '' : ' unsent'}`} role="alertdialog" aria-label="HELP" onClick={() => setHelpActive(false)}>
+        <div className={`help-overlay${helpActive === 'unsent' ? ' unsent' : ''}`} role="alertdialog" aria-label="HELP" onClick={() => setHelpActive(null)}>
           <span className="ring" aria-hidden="true" />
-          <div className="big">{connected ? 'HELP sent' : 'HELP not sent'}</div>
+          <div className="big">{helpActive === 'sent' ? 'HELP sent' : 'HELP not sent'}</div>
           <div className="sub">
-            {connected ? 'Your caregiver has been alerted.' : 'Relay is offline, so no one was alerted. Call out or use the call bell.'}
+            {helpActive === 'sent' ? "Your caregiver's phone will alert if it's connected." : 'Relay was offline, so no one was alerted. Call out or use the call bell.'}
           </div>
           <div className="dismiss">Click anywhere to dismiss</div>
         </div>
