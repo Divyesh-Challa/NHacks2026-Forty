@@ -103,6 +103,7 @@ export default function Patient() {
         } else {
           const delivered = sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() }) ?? false
           setHelpActive(delivered ? 'sent' : 'unsent')
+          aid(delivered ? 'Help sent' : 'Help not sent', true)
         }
       }
       if (nextLinks !== links) {
@@ -218,11 +219,13 @@ export default function Patient() {
         ? 'Select when the option you want is lit'
         : 'Look up, right, down or left to choose'
   const selectLabel = mode === 'scan' || spelling ? 'Select' : 'Finish'
+  // A mapping learned before a drop is stale: treat it as absent while offline so the keys show instead.
+  const liveMapping: Record<string, string> = connected ? mapping : {}
   // Which gesture does what. Without a live mapping (keyboard sim, backend offline) show the keys instead.
   const mapped = [
-    [selectLabel, mapping.SELECT],
-    ['Accept', mapping.ACCEPT],
-    ['HELP', mapping.HELP],
+    [selectLabel, liveMapping.SELECT],
+    ['Accept', liveMapping.ACCEPT],
+    ['HELP', liveMapping.HELP],
   ].filter(([, g]) => g)
   const controls = mapped.length
     ? mapped.map(([label, g]) => [label, GESTURE_LABELS[g!] ?? g!])
@@ -231,9 +234,9 @@ export default function Patient() {
         ['Accept', 'B'],
         ['HELP', 'hold H'],
       ]
-  const selectHint = GESTURE_LABELS[mapping.SELECT] ?? 'Space'
+  const selectHint = GESTURE_LABELS[liveMapping.SELECT] ?? 'Space'
   // The backend does not map ACCEPT today: only name a control that exists. Keyboard sim (no mapping at all) has B.
-  const acceptHint = mapping.ACCEPT ? (GESTURE_LABELS[mapping.ACCEPT] ?? mapping.ACCEPT) : mapped.length === 0 ? 'B' : null
+  const acceptHint = liveMapping.ACCEPT ? (GESTURE_LABELS[liveMapping.ACCEPT] ?? liveMapping.ACCEPT) : mapped.length === 0 ? 'B' : null
   const rb = machine.readback
 
   return (
