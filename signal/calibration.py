@@ -9,7 +9,8 @@ clench ×reps; hold ×reps/4), each in a fixed window followed by 2 s rest.
 
 From the recording:
   1. amplitude per signal = median peak of the filtered feature inside its prompt windows
-     (EOG relative to the half-second before the prompt; polarity of A0 detected from look_left)
+     (EOG relative to the half-second before the prompt; polarity of A0 detected from the direction
+     look_left first moves, since its return to centre can be the larger pulse)
   2. noise per signal = typical peak in 1 s rest chunks
   3. threshold = max(50% of amplitude, 2× noise); floor (near-miss) = max(25% of amplitude, 1.3× noise)
   4. run the real Pipeline with those settings over the whole recording:
@@ -59,6 +60,14 @@ def _window(t: np.ndarray, a: int, b: int) -> slice:
     return slice(int(np.searchsorted(t, a)), int(np.searchsorted(t, b, side="right")))
 
 
+def _onset(d: np.ndarray) -> float:
+    """Peak size, signed by the first half-peak crossing. On the AC-coupled pill the return to centre
+    is a pulse as big as the look and the other way, so the largest sample can be the return; the
+    look always comes first."""
+    a = np.abs(d)
+    return float(np.sign(d[np.argmax(a >= 0.5 * a.max())]) * a.max())
+
+
 def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     """Amplitudes and rest noise of each feature, before any thresholds."""
     t = rows[:, 0]
@@ -71,8 +80,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     for label, a, b in segs:
         w, p = _window(t, a, b), _window(t, a - pre, a)
         if label in eog and p.stop > p.start:
-            d = h[w] - np.median(h[p])
-            eog[label].append(float(d[np.argmax(np.abs(d))]))
+            eog[label].append(_onset(h[w] - np.median(h[p])))
         elif label in vert and p.stop > p.start:
             d = v[w] - np.median(v[p])
             vert[label].append(float(d[np.argmax(np.abs(d))]))
@@ -98,7 +106,7 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     vert_amps = [abs(x) for x in vert["look_down"] + ups]
     pct = lambda xs, q: float(np.percentile(xs, q)) if xs else 0.0  # noqa: E731
     return {
-        "eog_invert": False,
+        "eog_invert": invert,
         "vert_invert": vert_invert,
         "amplitude": {
             "eog_h": float(np.median(eog_amps)) if eog_amps else None,

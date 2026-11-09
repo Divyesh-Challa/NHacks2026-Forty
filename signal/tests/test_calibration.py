@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from calibration import calibrate, segments, synthetic_session
+from calibration import _onset, calibrate, segments, synthetic_session
 from sources.pipeline import PipelineSource
 
 
@@ -45,6 +45,13 @@ def test_inverted_electrodes_are_detected() -> None:
     result = calibrate(flipped, labels)
     assert result["settings"]["eog_invert"] is True
     assert result["signals"]["eog_h"]["accuracy"] >= 0.9
+
+
+def test_polarity_comes_from_the_look_not_its_larger_return() -> None:
+    # AC-coupled pill: look left (negative pulse), then the return to centre reads as a bigger positive one.
+    t = np.arange(1000) / 500
+    d = -100 * np.exp(-(((t - 0.4) / 0.08) ** 2)) + 120 * np.exp(-(((t - 1.2) / 0.08) ** 2))
+    assert _onset(d) < 0 and abs(_onset(d)) > 115
 
 
 def test_live_source_uses_calibration_and_near_misses_lower_reliability() -> None:
