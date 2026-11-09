@@ -8,6 +8,7 @@ recover_cutoff = 0.75        # must stay at/above this to switch back (hysteresi
 remap_window = 10            # attempts below cutoff before remapping
 recover_window = 20          # attempts above recover_cutoff before switching back
 debounce_ms = 300            # ignore duplicate commands within this window
+merge_window = 12            # a remap waits for another signal's run under way to join it (one banner): at most 12 readings; at most 9 when the only run being waited on is a loss
 
 [ui]
 scan_interval_ms = 1500
