@@ -48,7 +48,7 @@
 }
 .pt-name { font-weight: 700; font-size: 1.25rem; }
 .pt-title { grid-area: title; min-width: 0; }
-.pt-title h1 { margin: 0; font-size: 2.25rem; line-height: 1.1; letter-spacing: -0.01em; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-title h1 { margin: 0; font-size: 2rem; line-height: 1.1; letter-spacing: -0.01em; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pt-title p { margin: 4px 0 0; color: var(--p-dim); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pt-controls { grid-area: controls; display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .pt-controls li { display: flex; align-items: baseline; gap: 8px; padding: 9px 14px; background: var(--p-card); border-radius: 12px; white-space: nowrap; }
@@ -148,7 +148,7 @@
 .letter.active { background: var(--p-accent); color: #000; outline: 5px solid #fff; outline-offset: 3px; z-index: 1; }
 
 /* Read-back: nothing speaks until this is confirmed */
-.readback { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 32px; background: rgba(11, 13, 16, 0.97); text-align: center; animation: pt-fade 0.2s ease-out; }
+.readback { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 32px; background: var(--bg); text-align: center; animation: pt-fade 0.2s ease-out; }
 .rb-ask { color: var(--p-accent); font-size: 1.6rem; font-weight: 700; }
 .readback .sentence { max-width: 20ch; font-size: clamp(2.5rem, 6.5vw, 5.5rem); font-weight: 800; line-height: 1.1; letter-spacing: -0.01em; }
 .readback .hint { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 36px; color: var(--p-dim); font-size: 1.5rem; }
@@ -189,9 +189,9 @@
   .pt-controls { flex-wrap: wrap; }
 }
 @media (max-width: 700px) {
-  .patient { height: auto; min-height: 100dvh; overflow: visible; padding: 14px 12px 16px; gap: 12px; }
+  .patient { height: auto; min-height: 100dvh; overflow: visible; padding: 14px 16px 16px; gap: 12px; }
   .pt-head { grid-template-columns: 1fr auto; grid-template-areas: 'brand status' 'title title' 'controls controls'; }
-  .pt-title h1 { font-size: 1.8rem; }
+  .pt-title h1 { font-size: 1.4rem; }
   .pt-sub { display: none; }
   .pt-controls li { padding: 7px 10px; }
   .pt-controls .v { font-size: 0.95rem; }
