@@ -25,6 +25,13 @@ function run(actions: Action[], ctx = base, start: MachineState = INITIAL) {
 const says = (fx: Effect[]) => fx.filter((e) => e.kind === 'say')
 const water = [cmd('UP'), cmd('RIGHT'), cmd('UP'), cmd('RIGHT'), cmd('SELECT')]
 
+test('confirming HELP emits only the help effect: the page announces the outcome once it knows the send worked', () => {
+  const asked = run([cmd('LEFT'), cmd('RIGHT')])
+  assert.equal(asked.s.readback?.kind, 'help')
+  const sent = run([cmd('SELECT')], base, asked.s)
+  assert.deepEqual(sent.effects, [{ kind: 'help' }])
+})
+
 test('"I want water" is read back, then spoken only on the second SELECT', () => {
   const first = run(water)
   assert.equal(first.s.phase, 'readback')

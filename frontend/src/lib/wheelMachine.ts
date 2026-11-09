@@ -105,7 +105,8 @@ function finish(s: MachineState): Result {
 
 function confirm(s: MachineState, ctx: Ctx): Result {
   const rb = s.readback!
-  if (rb.kind === 'help') return [INITIAL, [{ kind: 'help' }, { kind: 'aid', text: 'Help sent', always: true }]]
+  // No voice here: the page speaks "Help sent" or "Help not sent" once it knows whether the alert went out.
+  if (rb.kind === 'help') return [INITIAL, [{ kind: 'help' }]]
   const key = keyChain(s.path)[0] ?? ''
   if (rb.kind === 'sentence') {
     const fx: Effect[] = [{ kind: 'say', text: rb.text, path: s.path.map((p) => p.node.word) }]

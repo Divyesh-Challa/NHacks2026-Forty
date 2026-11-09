@@ -1,0 +1,223 @@
+/* Patient screen (/patient/:id). Same product identity as the /demo console: true-black ground, cards one
+   lightness step up, no borders or shadows on cards, brand yellow as the one hue, red only for HELP.
+   AAC first: very large targets, strong contrast, the lit item unmistakable, no time pressure in wheel mode. */
+/* Everything is in rem: on a 1080p recording or a projector the whole screen scales up with the width. */
+:root:has(.patient) { font-size: clamp(16px, 1.25vw, 28px); }
+.patient {
+  --p-card: #15171a;
+  --p-nested: #23262b;
+  --p-text: var(--fg);
+  --p-dim: #b4b4b4;
+  --p-meta: #949494;
+  --p-accent: var(--accent);
+  --p-neg: #ff6159;
+  --p-warn: #ffb340;
+  --p-ok: #4cd964;
+  --p-help: #d92c20;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100dvh;
+  padding: 18px 24px 20px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--p-text);
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+/* Header: brand, board title, controls readout, status */
+.pt-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'brand title controls status';
+  align-items: center;
+  gap: 12px 28px;
+}
+.pt-brand { grid-area: brand; display: flex; align-items: center; gap: 10px; }
+.pt-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 3px solid var(--p-accent);
+  color: var(--p-accent);
+  font-weight: 800;
+  font-size: 17px;
+}
+.pt-name { font-weight: 700; font-size: 1.25rem; }
+.pt-title { grid-area: title; min-width: 0; }
+.pt-title h1 { margin: 0; font-size: 2rem; line-height: 1.1; letter-spacing: -0.01em; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-title p { margin: 4px 0 0; color: var(--p-dim); font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-controls { grid-area: controls; display: flex; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.pt-controls li { display: flex; align-items: baseline; gap: 8px; padding: 9px 14px; background: var(--p-card); border-radius: 12px; white-space: nowrap; }
+.pt-controls .k { color: var(--p-dim); font-size: 0.9rem; }
+.pt-controls .v { font-weight: 700; font-size: 1.05rem; }
+.pt-status { grid-area: status; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.pt-live { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 1.05rem; white-space: nowrap; }
+.pt-live .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--p-ok); }
+.pt-live.off { color: var(--p-neg); }
+.pt-live.off .dot { background: var(--p-neg); }
+.pt-sub { color: var(--p-meta); font-size: 0.9rem; white-space: nowrap; }
+.pt-sub a { color: var(--p-accent); }
+
+/* Notices (sound off, offline) and the mode banner */
+.pt-notice { padding: 12px 20px; background: var(--p-card); border-radius: 14px; font-size: 1.1rem; }
+.pt-notice.warn { color: var(--p-warn); }
+.pt-notice.late { color: var(--p-neg); opacity: 0; animation: pt-fade 0.3s 1.5s forwards; } /* stays quiet during the first connect */
+.mode-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 24px;
+  background: var(--p-card);
+  border-radius: 20px;
+  animation: pt-in 0.4s ease-out;
+}
+.mb-mark { width: 40px; height: 40px; border-radius: 50%; border: 5px solid var(--p-accent); }
+.mb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mb-text strong { font-size: 1.6rem; line-height: 1.2; color: var(--p-accent); }
+.mb-text span { font-size: 1.3rem; color: var(--p-text); }
+.mb-close { padding: 10px 18px; background: var(--p-nested); color: var(--p-text); border: 0; border-radius: 12px; font: inherit; font-size: 1rem; cursor: pointer; }
+.mb-close:hover, .mb-close:focus-visible { background: #2f333a; }
+
+/* Wheel: four fixed directions around a centre suggestion */
+.wheel-wrap { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.wheel {
+  flex: 1;
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  grid-template-areas: '. up .' 'left centre right' '. down .';
+  grid-template-columns: 1fr 1.2fr 1fr;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+.slot {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 10px 16px;
+  background: var(--p-card);
+  border-radius: 22px;
+  text-align: center;
+  transition: transform 0.15s;
+}
+.slot.up { grid-area: up; } .slot.right { grid-area: right; } .slot.down { grid-area: down; } .slot.left { grid-area: left; } .slot.centre { grid-area: centre; }
+.slot .cue { display: flex; align-items: center; gap: 10px; color: var(--p-dim); font-size: 1.15rem; font-weight: 600; }
+.slot .arrow { flex: none; color: var(--p-accent); }
+.slot.centre.empty .hint { color: var(--p-meta); font-weight: 500; }
+.slot .word { font-size: clamp(1.4rem, min(3.4vw, 6vh), 3.25rem); font-weight: 800; line-height: 1.1; overflow-wrap: anywhere; }
+.slot .back-tag { color: var(--p-accent); font-size: 1.1rem; font-weight: 700; }
+.slot.kept .word { color: var(--p-accent); }
+.slot.centre { background: var(--p-nested); }
+.slot.centre .tag { color: var(--p-accent); font-weight: 700; }
+.slot.centre .word { color: var(--p-accent); }
+.slot.empty { background: #101214; }
+.slot.empty .arrow { color: #4a4f57; }
+.slot.picked, .slot.active { background: var(--p-accent); color: #000; }
+.slot.picked .word, .slot.active .word, .slot.picked .back-tag, .slot.active .back-tag, .slot.picked .tag, .slot.active .tag { color: #000; }
+.slot.picked .cue, .slot.active .cue, .slot.picked .arrow, .slot.active .arrow { color: #000; }
+.slot.active { outline: 5px solid #fff; outline-offset: 3px; transform: scale(1.02); z-index: 1; }
+
+/* Scan progress: the bar fills while the highlight rests on an item, then the highlight moves on */
+.scan-timer { position: absolute; left: 0; bottom: 0; height: 10px; background: rgba(0, 0, 0, 0.5); animation: pt-scan linear forwards; }
+@keyframes pt-scan { from { width: 0; } to { width: 100%; } }
+
+.wheel-extras { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 12px; }
+.extra { position: relative; overflow: hidden; display: grid; place-items: center; min-height: 72px; background: var(--p-card); border-radius: 18px; font-size: 2rem; font-weight: 800; }
+.extra.help { color: var(--p-neg); }
+.extra.active { background: var(--p-accent); color: #000; outline: 5px solid #fff; outline-offset: 3px; }
+.extra.help.active { background: var(--p-help); color: #fff; }
+
+/* Spelling */
+.spell { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.letter-buffer { display: flex; align-items: center; flex: none; min-height: clamp(64px, 12vh, 112px); padding: 14px 28px; background: var(--p-card); border-radius: 22px; font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 800; letter-spacing: 0.04em; overflow-wrap: anywhere; }
+.letter-buffer .muted { font-weight: 600; letter-spacing: 0; color: var(--p-meta); }
+.caret { display: inline-block; width: 4px; height: 1em; background: var(--p-accent); margin-left: 6px; animation: pt-caret 1s steps(1) infinite; }
+@keyframes pt-caret { 50% { opacity: 0; } }
+.letters { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 10px; min-height: 0; }
+.letter { position: relative; overflow: hidden; display: grid; place-items: center; min-height: 0; background: var(--p-card); border-radius: 16px; font-size: clamp(1.2rem, 4.5vh, 2.2rem); font-weight: 800; }
+.letter.action { grid-column: span 2; background: var(--p-nested); font-size: clamp(1rem, 3.4vh, 1.6rem); }
+.letter.active { background: var(--p-accent); color: #000; outline: 5px solid #fff; outline-offset: 3px; z-index: 1; }
+
+/* Read-back: nothing speaks until this is confirmed */
+.readback { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 32px; background: var(--bg); text-align: center; animation: pt-fade 0.2s ease-out; }
+.rb-ask { color: var(--p-accent); font-size: 1.6rem; font-weight: 700; }
+.readback .sentence { max-width: 20ch; font-size: clamp(2.5rem, 6.5vw, 5.5rem); font-weight: 800; line-height: 1.1; letter-spacing: -0.01em; }
+.readback .hint { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 36px; color: var(--p-dim); font-size: 1.5rem; }
+.readback kbd { display: inline-block; padding: 6px 16px; background: var(--p-nested); border-radius: 12px; color: var(--p-accent); font: inherit; font-weight: 700; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: min(900px, 100%); }
+.choice { position: relative; overflow: hidden; padding: 36px 16px; background: var(--p-card); border-radius: 22px; font-size: 2.5rem; font-weight: 800; }
+.choice.active { background: var(--p-accent); color: #000; outline: 5px solid #fff; outline-offset: 3px; }
+.choice.help.active { background: var(--p-help); color: #fff; }
+
+/* Footer: what was last spoken */
+.pt-said { display: flex; align-items: baseline; gap: 20px; padding: 12px 24px; background: var(--p-card); border-radius: 18px; min-height: 64px; }
+.pt-said .k { color: var(--p-dim); font-size: 1.1rem; font-weight: 600; }
+.pt-said q { quotes: '\201C' '\201D'; font-size: 2rem; font-weight: 700; line-height: 1.2; }
+.pt-said .none { color: var(--p-meta); font-size: 1.25rem; }
+
+/* HELP: unmistakable. When Relay is offline it says so instead of claiming the alert went out. */
+.help-overlay { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 32px; background: var(--p-help); color: #fff; text-align: center; cursor: pointer; overflow: hidden; animation: pt-fade 0.15s ease-out; }
+.help-overlay .ring { position: absolute; left: 50%; top: 50%; width: 520px; height: 520px; margin: -260px 0 0 -260px; border-radius: 50%; border: 10px solid #fff; opacity: 0; animation: pt-ring 1.8s ease-out infinite; }
+.help-overlay .big { position: relative; font-size: clamp(4rem, 13vw, 10rem); font-weight: 800; line-height: 1; letter-spacing: -0.02em; }
+.help-overlay .sub { position: relative; max-width: 24ch; font-size: clamp(1.6rem, 3.4vw, 2.5rem); font-weight: 700; }
+.help-overlay .dismiss { position: relative; margin-top: 12px; font-size: 1.25rem; }
+.help-overlay.unsent { background: var(--p-card); }
+.help-overlay.unsent .big { color: var(--p-neg); }
+.help-overlay.unsent .ring { border-color: var(--p-neg); }
+
+/* Predicted phrases (PredictionStrip): tinted chips with an accent tag, distinct from board items */
+.predictions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.predictions .tag { color: var(--p-accent); font-weight: 700; }
+.chip { padding: 10px 18px; background: var(--p-nested); border-radius: 999px; font-size: 1.25rem; font-weight: 600; }
+
+@keyframes pt-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pt-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+@keyframes pt-ring { 0% { opacity: 0.6; transform: scale(0.4); } 100% { opacity: 0; transform: scale(1.5); } }
+
+/* Narrower than the 1280 pitch layout: controls drop under the title */
+@media (max-width: 1180px) {
+  .pt-head { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'brand title status' 'controls controls controls'; }
+  .pt-controls { flex-wrap: wrap; }
+}
+@media (max-width: 700px) {
+  .patient { height: auto; min-height: 100dvh; overflow: visible; padding: 14px 16px 16px; gap: 12px; }
+  .pt-head { grid-template-columns: 1fr auto; grid-template-areas: 'brand status' 'title title' 'controls controls'; }
+  .pt-title h1 { font-size: 1.4rem; }
+  .pt-sub { display: none; }
+  .pt-controls li { padding: 7px 10px; }
+  .pt-controls .v { font-size: 0.95rem; }
+  .wheel { min-height: 420px; gap: 8px; grid-template-columns: 1.1fr 1fr 1.1fr; }
+  .slot { padding: 8px 6px; border-radius: 16px; }
+  .slot .cue { flex-direction: column; gap: 2px; font-size: 0.8rem; }
+  .slot:not(.kept) .cue .hint { display: none; }
+  .slot .word { font-size: clamp(1rem, 4.3vw, 1.5rem); overflow-wrap: break-word; }
+  .mode-banner { grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 14px 16px; }
+  .mb-close { display: none; }
+  .mb-text strong { font-size: 1.25rem; }
+  .mb-text span { font-size: 1rem; }
+  .letters { grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); }
+  .letter { font-size: 1.6rem; }
+  .letter.action { font-size: 1.1rem; }
+  .pt-said q { font-size: 1.4rem; }
+  .extra { font-size: 1.5rem; }
+  .choices { grid-template-columns: 1fr; }
+  .choice { font-size: 2rem; padding: 26px 12px; }
+}
+
+/* Motion is feedback only: drop the travel, keep the content and the scan clock (it is information). */
+@media (prefers-reduced-motion: reduce) {
+  .mode-banner, .readback, .help-overlay, .slot, .slot .arrow, .letter { animation: none; transition: none; }
+  .slot.active { transform: none; }
+  .help-overlay .ring { animation: none; opacity: 0; }
+  .caret { animation: none; }
+  .pt-notice.late { animation-duration: 1ms; }
+}

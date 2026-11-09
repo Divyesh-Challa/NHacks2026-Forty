@@ -3,7 +3,7 @@ import { WS_URL } from './api'
 import type { PatientEvent, ServerEvent } from './types'
 
 export interface RelaySocket {
-  send: (ev: PatientEvent) => void
+  send: (ev: PatientEvent) => boolean // false when the socket is not open: the message was dropped, not queued
   close: () => void
 }
 
@@ -29,7 +29,9 @@ export function connect(
 
   return {
     send: (ev) => {
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(ev))
+      if (ws?.readyState !== WebSocket.OPEN) return false
+      ws.send(JSON.stringify(ev))
+      return true
     },
     close: () => {
       closed = true

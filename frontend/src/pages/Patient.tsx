@@ -2,10 +2,10 @@
 // All behaviour lives in lib/wheelMachine.ts; this page feeds it commands and ticks, then carries out
 // the effects it returns (aid voice, real speech, learned words, HELP).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { LetterBoard, LetterGrid } from '../components/LetterBoard'
 import { ModeBanner } from '../components/ModeBanner'
-import { RadialWheel } from '../components/RadialWheel'
+import { RadialWheel, ScanTimer } from '../components/RadialWheel'
 import { getConfig } from '../lib/api'
 import { allowed, DEMO_SCENARIOS } from '../lib/demoPath'
 import { FlickDetector } from '../lib/flickSim'
@@ -22,6 +22,7 @@ import { WHEEL } from '../lib/wheelTree'
 import { learn, loadWords, saveWords, suggest } from '../lib/words'
 import type { WordLink } from '../lib/words'
 import { connect, type RelaySocket } from '../lib/ws'
+import './patient.css'
 
 const GESTURE_LABELS: Record<string, string> = {
   look_left: 'look left',
@@ -61,11 +62,14 @@ export default function Patient() {
   const [flickCfg, setFlickCfg] = useState({ flickPx: 160, rearmPx: 50 })
   const [modeChange, setModeChange] = useState<ModeChangeEvent | null>(null)
   const [spoken, setSpoken] = useState<string[]>([])
-  const [helpActive, setHelpActive] = useState(false)
+  // Recorded at send time: the socket drops alerts while it is not open, so a later reconnect must not rewrite it.
+  const [helpActive, setHelpActive] = useState<'sent' | 'unsent' | null>(null)
   const [connected, setConnected] = useState(false)
   const [tickEpoch, setTickEpoch] = useState(0)
   const [demo, setDemo] = useState<string | null>(null) // guided demo sentence (keys 1-9), see lib/demoPath.ts
   const sock = useRef<RelaySocket | null>(null)
+  // The stage demo runs unpaired: with no token the WS simply connects without ?token=.
+  const token = useMemo(() => pairedToken(id), [id])
 
   const ctx: Ctx = useMemo(
     () => ({ root: WHEEL, mode, suggestFor: (p) => suggest(links, keyChain(p), Date.now()) }),
@@ -100,8 +104,9 @@ export default function Patient() {
         } else if (e.kind === 'learn') {
           nextLinks = learn(nextLinks, e.key, e.word, Date.now())
         } else {
-          setHelpActive(true)
-          sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() })
+          const delivered = sock.current?.send({ type: 'alert', message: 'HELP', ts: Date.now() }) ?? false
+          setHelpActive(delivered ? 'sent' : 'unsent')
+          aid(delivered ? 'Help sent' : 'Help not sent', true)
         }
       }
       if (nextLinks !== links) {
@@ -140,7 +145,7 @@ export default function Patient() {
     )
     sock.current = s
     return () => s.close()
-  }, [id, run])
+  }, [id, run, token])
 
   // Sound stays blocked until the first click or key press on this page (see tts.unlock).
   const [soundReady, setSoundReady] = useState(() => navigator.userActivation?.hasBeenActive ?? true)
@@ -215,64 +220,125 @@ export default function Patient() {
   const scanTargets = targets(machine, ctx)
   const highlight = mode === 'scan' && machine.phase === 'wheel' ? (scanTargets[machine.scanIndex] as Target) : null
   const extras = mode === 'scan' ? (scanTargets.filter((t) => t === 'finish' || t === 'help') as Target[]) : []
-  const crumb = ['Home', ...machine.path.map((p) => p.node.word)].join(' › ')
-  const controls = [
-    ['Finish', mapping.SELECT],
-    ['Accept', mapping.ACCEPT],
-    ['HELP', mapping.HELP],
+  const spelling = machine.phase === 'spell'
+  const title = spelling ? 'Spell a word' : (last?.node.word ?? 'Home')
+  const crumb = spelling
+    ? 'Pick letters, then Speak to finish'
+    : machine.path.length
+      ? ['Home', ...machine.path.map((p) => p.node.word)].join(' › ')
+      : mode === 'scan'
+        ? 'Select when the option you want is lit'
+        : 'Look up, right, down or left to choose'
+  const selectLabel = mode === 'scan' || spelling ? 'Select' : 'Finish'
+  // A mapping learned before a drop is stale: treat it as absent while offline so the keys show instead.
+  const liveMapping: Record<string, string> = connected ? mapping : {}
+  // Which gesture does what. Without a live mapping (keyboard sim, backend offline) show the keys instead.
+  const mapped = [
+    [selectLabel, liveMapping.SELECT],
+    ['Accept', liveMapping.ACCEPT],
+    ['HELP', liveMapping.HELP],
   ].filter(([, g]) => g)
+  const controls = mapped.length
+    ? mapped.map(([label, g]) => [label, GESTURE_LABELS[g!] ?? g!])
+    : [
+        [selectLabel, 'Space'],
+        ['Accept', 'B'],
+        ['HELP', 'hold H'],
+      ]
+  const selectHint = GESTURE_LABELS[liveMapping.SELECT] ?? 'Space'
+  // The backend does not map ACCEPT today: only name a control that exists. Keyboard sim (no mapping at all) has B.
+  const acceptHint = liveMapping.ACCEPT ? (GESTURE_LABELS[liveMapping.ACCEPT] ?? liveMapping.ACCEPT) : mapped.length === 0 ? 'B' : null
+  const rb = machine.readback
 
   return (
     <main className="patient">
-      <header>
-        <span>{crumb}</span>
-        <span className="status">
-          {controls.map(([label, g]) => `${label}: ${GESTURE_LABELS[g!] ?? g}`).join(' · ')}
-          {controls.length ? ' · ' : ''}
-          {mode} · aid {aidOn ? 'on' : 'off'} · {flickOn ? 'mouse flick on · ' : ''}
-          {connected ? 'online' : 'offline'}
-        </span>
+      <header className="pt-head">
+        <div className="pt-brand">
+          <span className="pt-mark" aria-hidden="true">R</span>
+          <span className="pt-name">Relay</span>
+        </div>
+        <div className="pt-title">
+          <h1>{title}</h1>
+          <p>{crumb}</p>
+        </div>
+        <ul className="pt-controls" aria-label="Controls">
+          {controls.map(([label, g]) => (
+            <li key={label}>
+              <span className="k">{label}</span>
+              <span className="v">{g}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="pt-status">
+          <span className={`pt-live ${connected ? 'on' : 'off'}`}>
+            <span className="dot" aria-hidden="true" />
+            {connected ? 'Online' : 'Offline'} · {mode === 'wheel' ? 'Wheel' : 'Scan'} mode
+          </span>
+          <span className="pt-sub">
+            {token ? 'Paired' : <>Not paired · <Link to="/pair">pair this device</Link></>} · Voice aid {aidOn ? 'on' : 'off'}
+            {flickOn ? ' · Mouse flick on' : ''}
+          </span>
+        </div>
       </header>
       {!soundReady && (
-        <div role="status" style={{ background: '#b45309', color: '#fff', padding: '8px 16px', textAlign: 'center' }}>
+        <div className="pt-notice warn" role="status">
           Sound is off. Click anywhere or press a key once to turn it on.
         </div>
       )}
-      <ModeBanner change={modeChange} />
-      {machine.phase === 'spell' ? (
-        <>
-          <LetterBoard text={machine.spelled} />
-          <LetterGrid items={SPELL_ITEMS} active={machine.scanIndex} />
-        </>
-      ) : (
-        <RadialWheel view={v} suggestion={centreWord} highlight={highlight} extras={extras} intervalMs={scanMs} />
+      {!connected && (
+        <div className="pt-notice late" role="status">
+          Not connected to Relay. The keyboard still works, but signals will not arrive and HELP alerts can't be sent while offline.
+        </div>
       )}
-      {machine.phase === 'readback' && machine.readback && (
-        <div className="readback" role="dialog" aria-live="assertive">
-          <div className="sentence">
-            {machine.readback.kind === 'word' ? `“${machine.readback.text}”?` : machine.readback.text}
-          </div>
+      <ModeBanner change={modeChange} />
+      {spelling ? (
+        <div className="spell">
+          <LetterBoard text={machine.spelled} />
+          <LetterGrid items={SPELL_ITEMS} active={machine.scanIndex} intervalMs={scanMs} epoch={tickEpoch} />
+        </div>
+      ) : (
+        <RadialWheel view={v} suggestion={centreWord} highlight={highlight} extras={extras} intervalMs={scanMs} epoch={tickEpoch} acceptHint={acceptHint} />
+      )}
+      {machine.phase === 'readback' && rb && (
+        <div className="readback" role="dialog" aria-live="assertive" aria-label="Confirm">
+          <div className="rb-ask">{rb.kind === 'help' ? 'Send an alert?' : rb.kind === 'word' ? 'Save this word?' : 'Speak this aloud?'}</div>
+          <div className="sentence">{rb.kind === 'word' ? `“${rb.text}”` : rb.text}</div>
           {mode === 'scan' ? (
             <div className="choices">
-              {[machine.readback.kind === 'help' ? '🚨 Send HELP' : '🔊 Speak', '✕ Cancel'].map((label, i) => (
-                <div key={label} className={`item${machine.scanIndex === i ? ' active' : ''}`}>
+              {[rb.kind === 'help' ? 'Send HELP' : rb.kind === 'word' ? 'Save word' : 'Speak', 'Cancel'].map((label, i) => (
+                <div key={label} className={`choice${i === 0 ? ' go' : ''}${rb.kind === 'help' && i === 0 ? ' help' : ''}${machine.scanIndex === i ? ' active' : ''}`}>
                   {label}
+                  {machine.scanIndex === i && <ScanTimer ms={scanMs} epoch={tickEpoch} />}
                 </div>
               ))}
             </div>
           ) : (
             <div className="hint">
-              {machine.readback.kind === 'word' ? 'To save this word' : machine.readback.kind === 'help' ? 'To send HELP' : 'To speak'}: {GESTURE_LABELS[mapping.SELECT] ?? 'select'} · look to cancel
+              <span className="pt-keys">
+                <kbd>{selectHint}</kbd> {rb.kind === 'word' ? 'to save this word' : rb.kind === 'help' ? 'to send HELP' : 'to speak'}
+              </span>
+              <span className="pt-keys">
+                <kbd>look any way</kbd> to cancel
+              </span>
             </div>
           )}
         </div>
       )}
-      {spoken[0] && <footer>Said: “{spoken[0]}”</footer>}
+      <footer className="pt-said" aria-live="polite">
+        <span className="k">Said</span>
+        {spoken[0] ? <q>{spoken[0]}</q> : <span className="none">Spoken phrases appear here</span>}
+      </footer>
       {helpActive && (
-        <div className="help-overlay" onClick={() => setHelpActive(false)}>
-          HELP sent to caregiver
+        <div className={`help-overlay${helpActive === 'unsent' ? ' unsent' : ''}`} role="alertdialog" aria-label="HELP" onClick={() => setHelpActive(null)}>
+          <span className="ring" aria-hidden="true" />
+          <div className="big">{helpActive === 'sent' ? 'HELP sent' : 'HELP not sent'}</div>
+          <div className="sub">
+            {helpActive === 'sent' ? "Your caregiver's phone will alert if it's connected." : 'Relay was offline, so no one was alerted. Call out or use the call bell.'}
+          </div>
+          <div className="dismiss">Click anywhere to dismiss</div>
         </div>
       )}
     </main>
   )
 }
+
