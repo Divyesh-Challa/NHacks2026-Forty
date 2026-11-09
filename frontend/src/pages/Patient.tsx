@@ -10,6 +10,7 @@ import { getConfig } from '../lib/api'
 import { allowed, DEMO_SCENARIOS } from '../lib/demoPath'
 import { FlickDetector } from '../lib/flickSim'
 import { attachKeyboardSim } from '../lib/keyboardSim'
+import { pairedToken } from '../lib/pairing'
 import { SPELL_ITEMS } from '../lib/spell'
 import { aid, speak, unlock } from '../lib/tts'
 import type { Command, Mode, ModeChangeEvent } from '../lib/types'
@@ -122,6 +123,7 @@ export default function Patient() {
   }, [id])
 
   useEffect(() => {
+    const token = pairedToken(id)
     const s = connect(
       `/ws/patient/${id}${token ? `?token=${encodeURIComponent(token)}` : ''}`,
       (ev) => {
