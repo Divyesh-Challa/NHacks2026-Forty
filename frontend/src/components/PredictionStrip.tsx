@@ -4,7 +4,7 @@ export function PredictionStrip({ phrases, loading }: { phrases: string[]; loadi
   if (!phrases.length && !loading) return null
   return (
     <div className="predictions" aria-label="Suggested phrases">
-      <span className="muted">{loading ? 'Thinking…' : 'Suggested:'}</span>
+      <span className="tag">{loading ? 'Thinking…' : 'Suggested'}</span>
       {phrases.map((p) => (
         <span key={p} className="chip">{p}</span>
       ))}

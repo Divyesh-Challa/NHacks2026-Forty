@@ -43,6 +43,7 @@ class Signal:
     def __init__(self, ws) -> None:
         self.ws = ws
         self.gain = {"eog_h": 1.0, "eog_v": 1.0, "blink": 1.0}
+        self.pending: list[list] = []  # [readings left, signal, factor]
 
     async def run(self) -> None:
         async def controls() -> None:
