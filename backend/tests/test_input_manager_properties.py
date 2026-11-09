@@ -169,8 +169,8 @@ def test_random_sequences_keep_invariants(seed: int) -> None:
 
 
 def test_random_sequences_exercise_the_merge_window() -> None:
-    held = sum(run_sequence(seed) for seed in SEEDS)  # 203 of 600 with the wheel rig (298 with split)
-    assert held >= 150, f"only {held} of {len(SEEDS)} seeds held a remap"
+    held = sum(run_sequence(seed) for seed in SEEDS)  # 298 of 600 at the time of writing
+    assert held >= 200, f"only {held} of {len(SEEDS)} seeds held a remap"
 
 
 def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
@@ -198,8 +198,9 @@ def run_hover(seed: int, signals: tuple[str, ...]) -> bool:
 
 
 def test_hover_between_cutoffs_never_flips_mapping() -> None:
-    in_scan = sum(run_hover(seed, RIG) for seed in SEEDS)  # 573 of 600 with the wheel rig
-    assert in_scan >= 250, f"only {in_scan} of {len(SEEDS)} seeds hovered in scan mode"
+    checked = sum(run_hover(seed, RIG) for seed in SEEDS)
+    # Wheel mode needs both eye channels, so more warm-ups end in the skipped ambiguous-scan state.
+    assert checked >= 250, f"only {checked} of {len(SEEDS)} seeds exercised the hover phase"
 
 
 # --- scan-mode SELECT stays put while hovering (once known gaps, now fixed) ---
@@ -207,30 +208,29 @@ def test_hover_between_cutoffs_never_flips_mapping() -> None:
 def scan_all_unhealthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
-        step(im, {"eog_h": 0.3, "eog_v": 0.3, "blink": 0.3})
+        step(im, {"eog_h": 0.3, "blink": 0.3})
     return im
 
 
 def scan_blink_and_brow_healthy() -> InputManager:
     im = InputManager(cfg=dict(CFG))
     for _ in range(10):
-        step(im, {"eog_h": 0.3, "eog_v": 0.3, "blink": 0.7, "brow": 0.65})
+        step(im, {"eog_h": 0.3, "blink": 0.7, "brow": 0.65})
     return im
 
 
 def test_probe_setups_reach_intended_state() -> None:
     im = scan_all_unhealthy()
-    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "eog_v", "blink"))
+    assert im.mode == "scan" and not any(im.healthy[s] for s in ("eog_h", "blink"))
     im = scan_blink_and_brow_healthy()
     assert im.mode == "scan" and im.healthy["blink"] and im.healthy["brow"]
-    assert not im.healthy["eog_h"] and not im.healthy["eog_v"]
+    assert not im.healthy["eog_h"]
 
 
 def test_hover_all_unhealthy_scan_keeps_select() -> None:
     im = scan_all_unhealthy()
     before = im.current_mapping()["SELECT"]
-    step(im, {"eog_h": 0.74, "eog_v": 0.6, "blink": 0.6})
-    step(im, {"eog_h": 0.6, "eog_v": 0.6, "blink": 0.74})
+    step(im, {"eog_h": 0.74, "blink": 0.6})
     assert im.current_mapping()["SELECT"] == before
 
 

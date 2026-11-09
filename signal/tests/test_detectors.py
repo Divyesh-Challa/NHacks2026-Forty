@@ -219,3 +219,39 @@ def test_a2_is_ignored() -> None:
     rows = exg.chunk(30 * FS)
     rows[:, 3] = 512 + 400 * np.sin(np.arange(len(rows)) / 5.0)
     assert Pipeline().process(rows) == []
+
+
+def test_crosstalk_arbitration_is_independent_of_chunk_size() -> None:
+    rows = _a1_pulse_rows(True)
+    settings = {'vert_threshold': 26.0, 'vert_floor': 13.0}
+    reference = Pipeline(settings=settings).process(rows)
+    for chunk in (1, 10, 137, 500):
+        p = Pipeline(settings=settings)
+        got = []
+        for i in range(0, len(rows), chunk):
+            got.extend(p.process(rows[i:i + chunk]))
+        assert got == reference
+
+
+def test_horizontal_near_miss_does_not_suppress_vertical_look() -> None:
+    rows = _a1_pulse_rows(True)
+    rows[:, 1] = 512 + .3 * (rows[:, 1] - 512)
+    events = Pipeline(settings={'vert_threshold': 26., 'vert_floor': 13.}).process(rows)
+    assert any(isinstance(e, NearMiss) and e.source == 'eog_h' for e in events)
+    assert any(isinstance(e, Detection) and e.gesture == 'look_up' for e in events)
+
+
+def test_single_blink_recovery_is_not_a_vertical_command() -> None:
+    rows = _a1_pulse_rows(False)
+    rows[:, 2] = 512
+    i = 3 * FS
+    rows[i:i + 75, 2] += 300 * np.sin(np.pi * np.arange(75) / 75)
+    rows[i + 75:i + 175, 2] -= 200 * np.sin(np.pi * np.arange(100) / 100)
+    events = Pipeline(settings={'vert_threshold': 26., 'vert_floor': 13.}).process(rows)
+    assert not [e for e in events if isinstance(e, Detection)]
+
+
+def test_fast_return_during_cooldown_resets_horizontal_zone() -> None:
+    # A quick centre return must not disappear inside the cooldown and swallow the next right look.
+    got = _looks(_ac_coupled([(2., -200.), (2.75, 0.), (4., 200.), (4.75, 0.)], tau_s=.5))
+    assert got == ['look_left', 'look_right']
