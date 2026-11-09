@@ -4,16 +4,15 @@
   python calibration.py --file recordings/session-….csv                 # offline, from tools.record
   python calibration.py --source synthetic                              # instant dry run
 
-Protocol (tools/record.py): 20 s rest, then shuffled prompts (look left/right, double blink,
-clench ×reps; hold ×reps/4), each in a fixed window followed by 2 s rest.
+Protocol (tools/record.py): 20 s rest, then shuffled looks and double blinks,
+each in a fixed window followed by 2 s rest.
 
 From the recording:
-  1. amplitude per signal = median peak of the filtered feature inside its prompt windows
-     (EOG relative to the half-second before the prompt; polarity of A0 detected from look_left)
-  2. noise per signal = typical peak in 1 s rest chunks
+  1. amplitude/polarity per direction = first sustained movement, before the return to centre
+  2. noise per signal = typical peak in initial quiet rest chunks after settling
   3. threshold = max(50% of amplitude, 2× noise); floor (near-miss) = max(25% of amplitude, 1.3× noise)
   4. run the real Pipeline with those settings over the whole recording:
-       accuracy = prompts where the right gesture was detected in time / prompts
+       accuracy = prompts with exactly one correct command and no other commands / prompts
        false-trigger rate = rest seconds with any detection of that signal / rest seconds
 These numbers seed live reliability, get POSTed to the backend, and are the ones we quote in the
 pitch. They're measured on the same data the thresholds came from, so treat them as optimistic.
@@ -60,6 +59,32 @@ def _window(t: np.ndarray, a: int, b: int) -> slice:
     return slice(int(np.searchsorted(t, a)), int(np.searchsorted(t, b, side="right")))
 
 
+def first_movement(d: np.ndarray, noise: float, fs: float) -> float | None:
+    """Measure the first sustained departure, never a larger opposite return later in the cue."""
+    gate = max(8.0, 4.0 * noise)
+    width = max(1, int(0.04 * fs))
+    for i in range(len(d) - width + 1):
+        sign = np.sign(d[i])
+        if sign and np.all(d[i:i + width] * sign > gate):
+            stop = min(len(d), i + int(0.7 * fs))
+            pulse = d[i:stop] * sign
+            # Stop at the first return across baseline, before measuring the peak.
+            ends = np.flatnonzero(pulse <= 0)
+            if len(ends):
+                pulse = pulse[:ends[0]]
+            return float(sign * np.max(pulse))
+    return None
+
+
+def rest_noise(x: np.ndarray) -> float:
+    """Robust background scale in ADC counts; sparse blink/contact spikes are not background.
+
+    1.4826 converts median absolute deviation to a Gaussian standard-deviation estimate. Transient
+    peaks are reported separately and still count as false commands in the full live evaluation.
+    """
+    return float(1.4826 * np.median(np.abs(x - np.median(x))))
+
+
 def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     """Amplitudes and rest noise of each feature, before any thresholds."""
     t = rows[:, 0]
@@ -73,16 +98,26 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
         w, p = _window(t, a, b), _window(t, a - pre, a)
         if label in eog and p.stop > p.start:
             d = h[w] - np.median(h[p])
-            eog[label].append(float(d[np.argmax(np.abs(d))]))
+            noise = float(np.median(np.abs(h[p] - np.median(h[p]))))
+            peak = first_movement(d, noise, fs)
+            if peak is not None:
+                eog[label].append(peak)
         elif label in vert and p.stop > p.start:
             d = v[w] - np.median(v[p])
-            vert[label].append(float(d[np.argmax(np.abs(d))]))
+            noise = float(np.median(np.abs(v[p] - np.median(v[p]))))
+            peak = first_movement(d, noise, fs)
+            if peak is not None:
+                vert[label].append(peak)
         elif label == "blink_double" and p.stop > p.start:
             blink.append(float(np.max(v[w] - np.median(v[p]))))
 
     rest_h, rest_v, rest_va = [], [], []
+    background_h, background_v = [], []
     for label, a, b in segs:
         if label != "rest":
+            continue
+        # Noise comes from the initial quiet rest, not eye-return / blink recovery tails.
+        if a != segs[0][1]:
             continue
         a = a + SETTLE_US if a == segs[0][1] else a + REST_SKIP_US
         for c in range(a, b - 1_000_000 + 1, 1_000_000):
@@ -90,25 +125,34 @@ def measure(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
             rest_h.append(float(np.max(np.abs(h[w] - np.median(h[w])))))
             rest_v.append(float(np.max(v[w] - np.median(v[w]))))
             rest_va.append(float(np.max(np.abs(v[w] - np.median(v[w])))))
+            background_h.append(rest_noise(h[w]))
+            background_v.append(rest_noise(v[w]))
 
-    lefts = eog["look_left"]
-    invert = bool(lefts) and float(np.median(lefts)) > 0  # look_left should read negative
+    def polarity(samples: dict, negative: str, positive: str) -> tuple[bool, float]:
+        votes = [x < 0 for x in samples[negative]] + [x > 0 for x in samples[positive]]
+        agreement = max(sum(votes), len(votes) - sum(votes)) / len(votes) if votes else 0.0
+        return bool(votes) and sum(votes) < len(votes) / 2, agreement
+
+    invert, h_agreement = polarity(eog, "look_left", "look_right")
     eog_amps = [abs(x) for x in eog["look_left"] + eog["look_right"]]
     ups = vert["look_up"]
-    vert_invert = bool(ups) and float(np.median(ups)) < 0  # look_up should read positive
+    vert_invert, v_agreement = polarity(vert, "look_down", "look_up")
     vert_amps = [abs(x) for x in vert["look_down"] + ups]
     pct = lambda xs, q: float(np.percentile(xs, q)) if xs else 0.0  # noqa: E731
     return {
         "eog_invert": invert,
         "vert_invert": vert_invert,
+        "polarity_agreement": {"eog_h": h_agreement, "eog_v": v_agreement},
+        "direction_amplitudes": {g: float(np.median(np.abs(xs))) for g, xs in {**eog, **vert}.items() if xs},
+        "direction_counts": {g: len(xs) for g, xs in {**eog, **vert}.items()},
         "amplitude": {
             "eog_h": float(np.median(eog_amps)) if eog_amps else None,
             "eog_v": float(np.median(vert_amps)) if vert_amps else None,
             "blink": float(np.median(blink)) if blink else None,
         },
-        # Rest blinks are real blinks, so blink noise uses the median chunk, not the tail.
-        # Rest blinks hit A1 too, so vertical noise is the median chunk like blink; a look must also outlast a blink.
-        "noise": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_v, 50)},
+        "rest_seconds_measured": len(background_h),
+        "noise": {"eog_h": pct(background_h, 50), "eog_v": pct(background_v, 50), "blink": pct(background_v, 50)},
+        "rest_transient_peak": {"eog_h": pct(rest_h, 90), "eog_v": pct(rest_va, 50), "blink": pct(rest_v, 50)},
     }
 
 
@@ -138,24 +182,33 @@ def thresholds(m: dict) -> dict:
             s[f"{key}_unit"] = round(amp, 2)  # size of one gesture; the zone tracker and blink-vs-look rule use these
         s[f"{key}_floor"] = round(min(max(0.25 * amp, 1.3 * noise), 0.8 * thr), 2)
     s.update(DETECTOR_OVERRIDES)  # pinned in relay.toml [detector_overrides]; survive every recalibration
+    for gesture, amp in m.get("direction_amplitudes", {}).items():
+        sig = "eog_h" if gesture in ("look_left", "look_right") else "eog_v"
+        prefix = "eog" if sig == "eog_h" else "vert"
+        noise = m["noise"][sig]
+        thr = DETECTOR_OVERRIDES.get(f"{prefix}_threshold", max(0.5 * amp, 2.0 * noise))
+        s[f"{gesture}_threshold"] = round(thr, 2)
+        s[f"{gesture}_floor"] = round(DETECTOR_OVERRIDES.get(f"{prefix}_floor", min(max(.25 * amp, 1.3 * noise), .8 * thr)), 2)
+        s[f"{gesture}_unit"] = round(amp, 2)
     return s
 
 
 def evaluate(rows: np.ndarray, labels: list[str], settings: dict, fs: float = FS) -> dict:
     """Run the real detectors with `settings` and score them against the prompts."""
     t = rows[:, 0]
-    # The prompts are shuffled with no return to centre between them, so the live "opposite look is the
-    # return" rule must be off here or every direction change would be scored as a miss.
-    detections = [e for e in Pipeline(fs, {**settings, "look_return_hold_ms": 0}).process(rows) if isinstance(e, Detection)]
+    pipe = Pipeline(fs, settings)
+    detections = []
+    chunk = max(1, int(fs * .02))
+    for i in range(0, len(rows), chunk):
+        detections.extend(e for e in pipe.process(rows[i:i + chunk]) if isinstance(e, Detection))
     segs = segments(t, labels)
     out = {}
     for sig, gestures in SIGNAL_GESTURES.items():
         prompts = [(g, a, b) for g, a, b in segs if g in gestures]
         if not prompts:
             continue
-        hits = sum(
-            any(d.gesture == g and a <= d.ts * 1000 <= b + MATCH_SLACK_US for d in detections) for g, a, b in prompts
-        )
+        outcomes = [[d.gesture for d in detections if a <= d.ts * 1000 <= b + MATCH_SLACK_US] for g, a, b in prompts]
+        hits = sum(got == [g] for (g, _, _), got in zip(prompts, outcomes))
         rest_s = triggered = 0
         for label, a, b in segs:
             if label != "rest":
@@ -171,6 +224,11 @@ def evaluate(rows: np.ndarray, labels: list[str], settings: dict, fs: float = FS
             "false_trigger_rate": round(ftr, 3),
             "reliability": round(score(acc, ftr), 3),
             "attempts": len(prompts),
+            "hits": sum(g in got for (g, _, _), got in zip(prompts, outcomes)),
+            "misses": sum(g not in got for (g, _, _), got in zip(prompts, outcomes)),
+            "extra_commands": sum(len(got) - int(g in got) for (g, _, _), got in zip(prompts, outcomes)),
+            "directions": {g: {"exact": sum(got == [g] for (wanted, _, _), got in zip(prompts, outcomes) if wanted == g),
+                                "attempts": sum(wanted == g for wanted, _, _ in prompts)} for g in gestures},
             "rest_seconds": rest_s,
         }
     return out
@@ -183,7 +241,20 @@ def calibrate(rows: np.ndarray, labels: list[str], fs: float = FS) -> dict:
     for sig in signals:
         signals[sig]["amplitude"] = m["amplitude"][sig] and round(m["amplitude"][sig], 1)
         signals[sig]["noise"] = round(m["noise"][sig], 1)
-    return {"created": datetime.now().isoformat(timespec="seconds"), "settings": settings, "signals": signals}
+    warnings = rail_warnings(rows)
+    if m["rest_seconds_measured"] < 5:
+        warnings.append("WARNING: fewer than five seconds of initial rest remain after settling. Record a longer initial rest before calibrating.")
+    for sig, gestures in (("eog_h", ["look_left", "look_right"]), ("eog_v", ["look_up", "look_down"])):
+        present = any(g in labels for g in gestures)
+        if present and (m["polarity_agreement"][sig] < .8 or any(m["direction_counts"][g] < 2 for g in gestures)):
+            counts = ', '.join(f"{g}={m['direction_counts'][g]}" for g in gestures)
+            warnings.append(f"WARNING: {sig} polarity needs at least 80% agreement and two usable movements per direction; got {m['polarity_agreement'][sig]:.0%} agreement, {counts}. Repeat calibration with clear looks and returns.")
+        for g in gestures:
+            amp = m["direction_amplitudes"].get(g)
+            if amp and 2 * m["noise"][sig] >= amp:
+                warnings.append(f"WARNING: {g} is not separated from rest noise (amplitude {amp:.1f}, noise {m['noise'][sig]:.1f}). Improve contact and keep still during the initial rest; do not lower the threshold to compensate.")
+    return {"created": datetime.now().isoformat(timespec="seconds"), "settings": settings, "signals": signals,
+            "measurement": m, "warnings": warnings, "valid": not warnings}
 
 
 def load_calibration(path: Path = CAL_PATH) -> dict | None:
@@ -223,7 +294,13 @@ def synthetic_session(reps: int = 10, rest_s: float = 20.0, seed: int | None = N
         chunk = exg.chunk(int(secs * exg.fs))
         rows.append(chunk)
         labels += [label] * len(chunk)
-    return np.vstack(rows), labels
+    rows = np.vstack(rows)
+    # The hardware is AC-coupled: held looks decay and returning to centre produces the opposite
+    # pulse. Include that in calibration's dry run so its live position tracker can observe returns.
+    from scipy.signal import lfilter
+    alpha = .5 / (.5 + 1 / exg.fs)
+    rows[:, 1] = np.rint(512 + lfilter([alpha, -alpha], [1, -alpha], rows[:, 1] - rows[0, 1]))
+    return rows, labels
 
 
 def post_to_backend(result: dict, patient_id: str) -> None:
@@ -235,18 +312,27 @@ def post_to_backend(result: dict, patient_id: str) -> None:
 
 
 def report(result: dict) -> str:
-    lines = [f"{'signal':8} {'accuracy':>9} {'false trig/s':>13} {'reliability':>12} {'amplitude':>10} {'noise':>7} {'n':>4}"]
+    lines = [f"{'signal':8} {'exact acc':>9} {'rest false %':>13} {'reliability':>12} {'amplitude':>10} {'noise':>7} {'n':>4}"]
     for sig, r in result["signals"].items():
         lines.append(
             f"{sig:8} {r['accuracy']:>9.0%} {r['false_trigger_rate']:>13.0%} {r['reliability']:>12.2f}"
             f" {r['amplitude'] or 0:>10.1f} {r['noise']:>7.1f} {r['attempts']:>4}"
         )
+        for gesture, counts in r.get("directions", {}).items():
+            lines.append(f"  {gesture}: exactly one correct command {counts['exact']}/{counts['attempts']}")
+        lines.append(f"  missed prompts: {r.get('misses', 0)}, extra commands: {r.get('extra_commands', 0)}")
     s = result["settings"]
     lines.append(
         f"thresholds: eog {s['eog_threshold']} (floor {s['eog_floor']}, invert={s['eog_invert']}), "
         f"look up/down {s['vert_threshold']} (floor {s['vert_floor']}, invert={s['vert_invert']}), "
         f"blink {s['blink_threshold']} (floor {s['blink_floor']})"
     )
+    for g in ("look_left", "look_right", "look_up", "look_down"):
+        if f"{g}_threshold" in s:
+            lines.append(f"  {g}: threshold {s[g + '_threshold']}, floor {s[g + '_floor']}")
+    transient = result.get("measurement", {}).get("rest_transient_peak")
+    if transient:
+        lines.append(f"Rest transient peaks (not background noise): horizontal {transient['eog_h']:.1f}, vertical {transient['eog_v']:.1f}. Extras and rest false triggers still include their effects.")
     return "\n".join(lines)
 
 
@@ -275,13 +361,18 @@ def main() -> None:
 
     result = calibrate(rows, labels)
     print(report(result))
-    for w in rail_warnings(rows):
+    for w in result["warnings"]:
         print(w)
-    CAL_PATH.write_text(json.dumps(result, indent=2))
     log = HERE / "recordings" / f"calibration-{datetime.now():%Y%m%d-%H%M%S}.json"
     log.parent.mkdir(exist_ok=True)
     log.write_text(json.dumps(result, indent=2))
-    print(f"saved {CAL_PATH.name} (live thresholds) and {log.relative_to(HERE)}")
+    if not result["valid"]:
+        print(f"Saved rejected candidate to {log.relative_to(HERE)}; existing calibration.json was preserved.")
+        return
+    if CAL_PATH.exists():
+        (HERE / "calibration.prev.json").write_bytes(CAL_PATH.read_bytes())
+    CAL_PATH.write_text(json.dumps(result, indent=2))
+    print(f"saved {CAL_PATH.name} (live thresholds) and {log.relative_to(HERE)}; previous calibration backed up automatically")
     if not args.no_post:
         try:
             post_to_backend(result, args.patient)
