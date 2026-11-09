@@ -32,6 +32,20 @@ def gestures(a1: np.ndarray) -> list[tuple[str, str]]:
     return [(e.source, e.gesture) for e in events if isinstance(e, Detection)]
 
 
+def test_a_blink_under_a_hardware_eye_degrade_is_still_a_blink_not_a_look() -> None:
+    # The gain knob scales the pulse, so the blink-sized test has to scale with it, or every rest
+    # blink reads as a successful look up and eog_v never falls.
+    a1 = trace(*blink(3))
+    n = len(a1)
+    rows = np.column_stack([np.arange(n) * 2000, np.full(n, 512), a1, np.full(n, 500)])
+    p = Pipeline(settings={"vert_threshold": 26.0, "vert_floor": 13.0, "vert_invert": False})
+    p.set_gain("eye", 0.3)
+    events = []
+    for i in range(0, n, 50):
+        events += p.process(rows[i : i + 50])
+    assert [e for e in events if e.source == "eog_v"] == []
+
+
 def test_short_pulse_up_and_down_are_looks() -> None:
     assert gestures(trace((3, 0.15, 300))) == [("eog_v", "look_up")]
     assert gestures(trace((3, 0.15, -250))) == [("eog_v", "look_down")]

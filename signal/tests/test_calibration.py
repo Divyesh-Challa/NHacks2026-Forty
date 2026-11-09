@@ -4,6 +4,7 @@ import numpy as np
 
 from calibration import calibrate, segments, synthetic_session
 from sources.pipeline import PipelineSource
+from sources.synthetic import SyntheticEXG
 
 
 class Rows:
@@ -48,8 +49,6 @@ def test_inverted_electrodes_are_detected() -> None:
 
 
 def test_live_source_uses_calibration_and_near_misses_lower_reliability() -> None:
-    from sources.synthetic import SyntheticEXG
-
     cal = calibrate(*synthetic_session(reps=4, seed=4))
     exg = SyntheticEXG(seed=5)
     exg.degrade("eye", 0.3)
@@ -59,6 +58,36 @@ def test_live_source_uses_calibration_and_near_misses_lower_reliability() -> Non
     assert src.reliability()["signals"]["eog_h"] >= 0.9  # seeded from calibration
     assert src.handle(src.stream.read()) == []  # weak looks aren't detected...
     assert src.reliability()["signals"]["eog_h"] < 0.6  # ...and the near-misses count against it
+
+
+class SyntheticRows:
+    """A synthetic stream that hands out `seconds` of samples per read (PipelineSource drives exg)."""
+
+    def __init__(self, seconds: float, seed: int) -> None:
+        self.exg = SyntheticEXG(seed=seed)
+        self.n = int(seconds * 500)
+
+    def read(self):
+        return self.exg.chunk(self.n)
+
+
+def test_eye_degrade_lowers_both_eye_signals_through_the_real_detectors(monkeypatch) -> None:
+    """run.py --detectors real: an "eye" degrade must take eog_v down with eog_h (the wheel needs both)."""
+    import calibration
+
+    monkeypatch.setattr(calibration, "DETECTOR_OVERRIDES", {})  # pins are for the rig, not synthetic amplitudes
+    src =PipelineSource(SyntheticRows(2.0, seed=6), calibration=calibrate(*synthetic_session(reps=4, seed=4)))
+    first = src.reliability()["signals"]
+    assert set(first) == {"eog_h", "eog_v", "blink"}
+    src.degrade("eye", 0.3)
+    for g in ["look_left", "look_up", "look_right", "look_down", "blink_double"] * 4:
+        src.trigger(g)
+        src.handle(src.stream.read())
+    r = src.reliability()["signals"]
+    assert r["eog_h"] < 0.6 and r["eog_v"] < 0.6
+    assert r["blink"] >= 0.75
+    src.degrade("eye", 1.0)
+    assert not src.pipeline.vert.misses
 
 
 def test_pinned_overrides_survive_calibration(monkeypatch) -> None:

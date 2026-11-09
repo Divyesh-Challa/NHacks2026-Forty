@@ -1,10 +1,11 @@
 """Synthetic EXG: Arduino-format waveforms with labels, degrade, and the simulated event stream."""
 
 import asyncio
+import itertools
 
 import numpy as np
 
-from sources.synthetic import SimulatedDetector, SyntheticEXG, SyntheticSource
+from sources.synthetic import DEFAULT_SCRIPT, SimulatedDetector, SyntheticEXG, SyntheticSource
 
 FS = 500
 
@@ -37,6 +38,17 @@ def test_look_left_and_right_step_opposite_ways_on_a0() -> None:
     left = window(rows, 0.65, 1.1)[:, 1].mean()
     right = window(rows, 2.15, 2.6)[:, 1].mean()
     assert left < rest - 100 and right > rest + 100
+
+
+def test_look_up_and_down_step_opposite_ways_on_a1() -> None:
+    exg = SyntheticEXG(seed=2)
+    exg.trigger("look_up", delay_s=0.5)
+    exg.trigger("look_down", delay_s=2.0)
+    rows = exg.chunk(FS * 3)
+    rest = window(rows, 0.0, 0.4)[:, 2].mean()
+    up = window(rows, 0.65, 1.1)[:, 2].mean()
+    down = window(rows, 2.15, 2.6)[:, 2].mean()
+    assert up > rest + 150 and down < rest - 150
 
 
 def test_blink_spikes_on_a1() -> None:
@@ -78,9 +90,47 @@ def test_degrade_makes_reliability_fall_below_cutoff_from_missed_gestures() -> N
     src.degrade("eye", 0.3)
     for _ in range(8):
         src.attempt("look_left")
+        src.attempt("look_up")
         src.attempt("blink_double")
     assert src.tracker.score("eog_h") < 0.6
+    assert src.tracker.score("eog_v") < 0.6  # the wheel needs both axes, and "eye" fades both
     assert src.tracker.score("blink") > 0.75  # "eye" fades the looks only; blinking stays healthy
+
+
+def _readings_after_eye_degrade(seed: int, warm: int = 20, after: int = 40) -> list[dict[str, float]]:
+    """SyntheticSource.events()' schedule without the clock: a scripted attempt every 0.6 s, and every
+    second a rest second plus one reliability reading. Degrade "eye" to 0.3 after `warm` readings."""
+    src, script = SyntheticSource(seed=seed), itertools.cycle(DEFAULT_SCRIPT)
+    out: list[dict[str, float]] = []
+    next_gesture, next_reading = 6, 10  # tenths of a second
+    while len(out) < warm + after:
+        now = min(next_gesture, next_reading)
+        if now == next_gesture:
+            src.attempt(next(script))
+            next_gesture += 6
+        if now == next_reading:
+            src.rest_second()
+            out.append(src.reliability()["signals"])
+            next_reading += 10
+            if len(out) == warm:
+                src.degrade("eye", 0.3)
+    return out[warm:]
+
+
+def test_eye_degrade_makes_both_eye_signals_fall_together() -> None:
+    """One wheel -> scan banner: when the first eye signal has 10 readings below 0.6 (the backend's
+    remap_window), the other must already be below 0.6, so the backend's merge window joins them."""
+    together = 0
+    for seed in range(100):
+        r = _readings_after_eye_degrade(seed)
+        lost = {
+            s: next(i for i in range(9, len(r)) if all(x[s] < 0.6 for x in r[i - 9 : i + 1])) for s in ("eog_h", "eog_v")
+        }
+        first, other = sorted(lost, key=lost.get)
+        together += r[lost[first]][other] < 0.6
+        assert max(lost.values()) <= 30  # both are lost within half a minute of the degrade
+        assert all(x["blink"] >= 0.6 for x in r)  # blinking stays healthy: double blink takes over SELECT
+    assert together >= 95
 
 
 def test_restore_recovers_reliability() -> None:
@@ -109,7 +159,7 @@ def test_event_stream_sends_gestures_and_reliability() -> None:
     gestures = [e["gesture"] for e in events if e["type"] == "gesture"]
     assert "blink_double" in gestures or len(gestures) > 3
     rel = [e for e in events if e["type"] == "reliability"][-1]
-    assert set(rel["signals"]) == {"eog_h", "blink"}
+    assert set(rel["signals"]) == {"eog_h", "eog_v", "blink"}
 
 
 def test_quiet_stream_sends_only_keyboard_gestures_but_still_degrades() -> None:
@@ -130,3 +180,4 @@ def test_quiet_stream_sends_only_keyboard_gestures_but_still_degrades() -> None:
     gestures = [e["gesture"] for e in events if e["type"] == "gesture"]
     assert gestures == ["blink_double"]
     assert src.tracker.score("eog_h") < 0.6
+    assert set(events[-1]["signals"]) == {"eog_h", "eog_v", "blink"}

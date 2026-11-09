@@ -49,6 +49,7 @@ class PipelineSource:
     def degrade(self, signal: str, factor: float) -> None:
         if self.exg is not None:
             self.exg.degrade(signal, factor)  # synthetic: shrink the gesture, keep the noise
+            self.pipeline.mark_degraded(signal, factor < 1)
         else:
             self.pipeline.set_gain(signal, factor)  # hardware: scale the measured signal
 

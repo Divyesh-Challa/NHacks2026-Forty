@@ -173,7 +173,11 @@ class VerticalEogDetector:
     vert_pair_ms by a deep negative trough (and usually a second spike); a look up is a positive
     pulse with no such trough; a look down is a negative pulse with no positive spike just before it.
     A look up is therefore reported vert_pair_ms after the pulse, once no trough or second spike came.
-    No near-misses are emitted (ponytail: eog_v reliability never falls; add them if it must remap).
+    Near-misses (a look-shaped pulse past the floor, short of threshold) are only reported while the
+    signal is degraded (`misses`, set by Pipeline.set_gain / mark_degraded). At rest on the rig a small
+    A1 pulse is as often a weak blink or noise as a weak look, and counting those would push eog_v,
+    and with it the wheel, out while nothing is wrong. Under a degrade the person keeps trying looks
+    that land short, and eog_v reliability has to fall with eog_h for one wheel -> scan switch.
     """
 
     source = "eog_v"
@@ -202,6 +206,8 @@ class VerticalEogDetector:
         self.pending: tuple[int, float] | None = None  # (end, peak) of a positive pulse not yet proven a look
         self.ready_at = 0
         self.rearm_until, self.rearm_sign = 0, 0
+        self.misses = False
+        self.last_end = -(10**12)  # end of the previous pulse of either sign
 
     def process(self, x: np.ndarray, t_us: np.ndarray) -> list[Event]:
         out: list[Event] = []
@@ -231,6 +237,9 @@ class VerticalEogDetector:
         return out
 
     def _pulse(self, sign: int, peak: float, start: int, end: int) -> list[Event]:
+        # A pulse right after another is that one's trough, swing or second spike, never a look of its own.
+        alone = start - self.last_end > self.pair_us
+        self.last_end = end
         if sign > 0:
             second_spike = self.pending is not None and start - self.pending[0] <= self.pair_us
             if peak >= self.thresholds[1]:
@@ -238,12 +247,12 @@ class VerticalEogDetector:
             self.pending = None if second_spike else ((end, peak) if peak >= self.thresholds[1] else None)
             self.pending_ok = False
             self.swing = 0.0
-            return []
+            return self._miss(peak, end) if alone and peak < self.threshold else []
         if (
             self.pending
             and start - self.pending[0] <= self.pair_us
             and peak >= 0.35 * self.pending[1]
-            and self.pending[1] >= self.blink_min  # only a blink-sized spike has a blink's trough;
+            and self.pending[1] >= self.blink_min * self.gain  # only a blink-sized spike has a blink's trough;
         ):  # a small look-up pulse is followed by an equally small negative swing (measured: ~60 / ~45)
             self.pending = None  # the trough after a blink spike
             return []
@@ -256,7 +265,12 @@ class VerticalEogDetector:
                 self.swing = max(self.swing, peak)
         if peak >= self.thresholds[-1] and start - self.last_pos_end > self.pair_us:
             return self._emit("look_down", peak, end)
-        return []
+        return self._miss(peak, end) if alone and peak < self.threshold else []
+
+    def _miss(self, peak: float, ts: int) -> list[Event]:
+        if not self.misses or ts < self.ready_at or ts < self.rearm_until:
+            return []
+        return [NearMiss(self.source, peak, int(ts // 1000))]
 
     def _emit(self, gesture: str, peak: float, ts: int, confirmed: bool = True, swing: float = 0.0) -> list[Event]:
         sign = 1 if gesture == "look_up" else -1
@@ -379,6 +393,13 @@ class Pipeline:
         for s in ["eog_h", "eog_v"] if signal == "eye" else [signal]:
             if s in self.detectors:
                 self.detectors[s].gain = factor
+        self.mark_degraded(signal, factor < 1)
+
+    def mark_degraded(self, signal: str, on: bool) -> None:
+        """Demo degrade on/off: eog_v reports near-misses only while degraded (see VerticalEogDetector).
+        set_gain calls it; a synthetic source that shrinks the waveform itself calls it directly."""
+        if signal in ("eye", "eog_v"):
+            self.vert.misses = on
 
     def features(self, rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Filtered traces (EOG-H, EOG-V) — for plotting and calibration."""
